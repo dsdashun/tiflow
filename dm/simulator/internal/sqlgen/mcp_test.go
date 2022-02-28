@@ -18,18 +18,29 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/tiflow/dm/pkg/log"
 )
 
-func TestMCPNextUK(t *testing.T) {
+type testMCPSuite struct {
+	suite.Suite
+}
+
+func (s *testMCPSuite) SetupSuite() {
+	assert.Nil(s.T(), log.InitLogger(&log.Config{}))
+}
+
+func (s *testMCPSuite) TestMCPNextUK() {
 	mcp := NewModificationCandidatePool()
 	mcp.PreparePool()
 	for i := 0; i < 10; i++ {
 		theUK := mcp.NextUK()
-		t.Logf("next UK: %v", theUK)
+		s.T().Logf("next UK: %v", theUK)
 	}
 }
 
-func TestMCPAddDeleteBasic(t *testing.T) {
+func (s *testMCPSuite) TestMCPAddDeleteBasic() {
 	var (
 		curPoolSize int
 		err         error
@@ -44,10 +55,10 @@ func TestMCPAddDeleteBasic(t *testing.T) {
 				"id": rand.Int(),
 			},
 		})
-		assert.Nil(t, err)
-		assert.Equal(t, len(mcp.keyPool), curPoolSize+i+1, "key pool size is not equal")
-		assert.Equal(t, mcp.keyPool[curPoolSize+i].RowID, curPoolSize+i, "the new added UK's row ID is abnormal")
-		t.Logf("new added UK: %v\n", mcp.keyPool[curPoolSize+i])
+		assert.Nil(s.T(), err)
+		assert.Equal(s.T(), len(mcp.keyPool), curPoolSize+i+1, "key pool size is not equal")
+		assert.Equal(s.T(), mcp.keyPool[curPoolSize+i].RowID, curPoolSize+i, "the new added UK's row ID is abnormal")
+		s.T().Logf("new added UK: %v\n", mcp.keyPool[curPoolSize+i])
 	}
 	// test delete from bottom
 	curPoolSize = len(mcp.keyPool)
@@ -55,30 +66,30 @@ func TestMCPAddDeleteBasic(t *testing.T) {
 		err = mcp.DeleteUK(&UniqueKey{
 			RowID: curPoolSize - i - 1,
 		})
-		assert.Nil(t, err)
-		assert.Equal(t, len(mcp.keyPool), curPoolSize-i-1, "key pool size is not equal")
+		assert.Nil(s.T(), err)
+		assert.Equal(s.T(), len(mcp.keyPool), curPoolSize-i-1, "key pool size is not equal")
 	}
 	// test delete from top
 	for i := 0; i < 5; i++ {
 		err = mcp.DeleteUK(&UniqueKey{
 			RowID: i,
 		})
-		assert.Nil(t, err)
-		assert.Equal(t, mcp.keyPool[i].RowID, i, "the new added UK's row ID is abnormal")
-		t.Logf("new UK after delete on the index %d: %v\n", i, mcp.keyPool[i])
+		assert.Nil(s.T(), err)
+		assert.Equal(s.T(), mcp.keyPool[i].RowID, i, "the new added UK's row ID is abnormal")
+		s.T().Logf("new UK after delete on the index %d: %v\n", i, mcp.keyPool[i])
 	}
 	// test delete at random position
 	for i := 0; i < 5; i++ {
 		theUK := mcp.NextUK()
 		deleteRowID := theUK.RowID
 		err = mcp.DeleteUK(theUK)
-		assert.Nil(t, err)
-		assert.Equal(t, mcp.keyPool[deleteRowID].RowID, deleteRowID, "the new added UK's row ID is abnormal")
-		t.Logf("new UK after delete on the index %d: %v\n", deleteRowID, mcp.keyPool[deleteRowID])
+		assert.Nil(s.T(), err)
+		assert.Equal(s.T(), mcp.keyPool[deleteRowID].RowID, deleteRowID, "the new added UK's row ID is abnormal")
+		s.T().Logf("new UK after delete on the index %d: %v\n", deleteRowID, mcp.keyPool[deleteRowID])
 	}
 }
 
-func TestMCPAddDeleteInParallel(t *testing.T) {
+func (s *testMCPSuite) TestMCPAddDeleteInParallel() {
 	mcp := NewModificationCandidatePool()
 	mcp.PreparePool()
 	beforeLen := mcp.Len()
@@ -102,7 +113,7 @@ func TestMCPAddDeleteInParallel(t *testing.T) {
 					return
 				}
 				newLen := mcp.Len()
-				t.Logf("new added UK: %v\n", mcp.GetUKByRowID(newLen-1))
+				s.T().Logf("new added UK: %v\n", mcp.GetUKByRowID(newLen-1))
 			}
 		}()
 		return ch
@@ -121,9 +132,9 @@ func TestMCPAddDeleteInParallel(t *testing.T) {
 				if err != nil {
 					return
 				}
-				t.Logf("deletedUK: %v\n", theUK)
+				s.T().Logf("deletedUK: %v\n", theUK)
 				if theUK != nil {
-					t.Logf("new position on UK: %v\n", mcp.GetUKByRowID(theUK.RowID))
+					s.T().Logf("new position on UK: %v\n", mcp.GetUKByRowID(theUK.RowID))
 				}
 			}
 		}()
@@ -132,8 +143,12 @@ func TestMCPAddDeleteInParallel(t *testing.T) {
 	close(pendingCh)
 	err1 := <-ch1
 	err2 := <-ch2
-	assert.Nil(t, err1)
-	assert.Nil(t, err2)
+	assert.Nil(s.T(), err1)
+	assert.Nil(s.T(), err2)
 	afterLen := mcp.Len()
-	assert.Equal(t, beforeLen, afterLen, "the key pool size has changed after the parallel modification")
+	assert.Equal(s.T(), beforeLen, afterLen, "the key pool size has changed after the parallel modification")
+}
+
+func TestMCPSuite(t *testing.T) {
+	suite.Run(t, &testMCPSuite{})
 }

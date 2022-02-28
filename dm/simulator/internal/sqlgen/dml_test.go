@@ -17,9 +17,20 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/tiflow/dm/pkg/log"
 )
 
-func TestDMLBasic(t *testing.T) {
+type testDMLSuite struct {
+	suite.Suite
+}
+
+func (s *testDMLSuite) SetupSuite() {
+	assert.Nil(s.T(), log.InitLogger(&log.Config{}))
+}
+
+func (s *testDMLSuite) TestDMLBasic() {
 	var (
 		err error
 		sql string
@@ -32,19 +43,19 @@ func TestDMLBasic(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		uk = ukIter.NextUK()
 		sql, err = g.GenUpdateRow(uk)
-		assert.Nil(t, err)
-		t.Logf("Generated SQL: %s\n", sql)
+		assert.Nil(s.T(), err)
+		s.T().Logf("Generated SQL: %s\n", sql)
 		sql, uk, err = g.GenInsertRow()
-		assert.Nil(t, err)
-		t.Logf("Generated SQL: %s\n; Unique key: %v\n", sql, uk)
+		assert.Nil(s.T(), err)
+		s.T().Logf("Generated SQL: %s\n; Unique key: %v\n", sql, uk)
 		uk = ukIter.NextUK()
 		sql, err = g.GenDeleteRow(uk)
-		assert.Nil(t, err)
-		t.Logf("Generated SQL: %s\n; Unique key: %v\n", sql, uk)
+		assert.Nil(s.T(), err)
+		s.T().Logf("Generated SQL: %s\n; Unique key: %v\n", sql, uk)
 	}
 }
 
-func TestDMLAbnormalUK(t *testing.T) {
+func (s *testDMLSuite) TestDMLAbnormalUK() {
 	var (
 		sql string
 		err error
@@ -58,9 +69,9 @@ func TestDMLAbnormalUK(t *testing.T) {
 		},
 	}
 	_, err = g.GenUpdateRow(uk)
-	assert.NotNil(t, err)
+	assert.NotNil(s.T(), err)
 	_, err = g.GenDeleteRow(uk)
-	assert.NotNil(t, err)
+	assert.NotNil(s.T(), err)
 
 	uk = &UniqueKey{
 		RowID: -1,
@@ -70,9 +81,13 @@ func TestDMLAbnormalUK(t *testing.T) {
 		},
 	}
 	sql, err = g.GenUpdateRow(uk)
-	assert.Nil(t, err)
-	t.Logf("Generated SQL: %s\n", sql)
+	assert.Nil(s.T(), err)
+	s.T().Logf("Generated SQL: %s\n", sql)
 	sql, err = g.GenDeleteRow(uk)
-	assert.Nil(t, err)
-	t.Logf("Generated SQL: %s\n", sql)
+	assert.Nil(s.T(), err)
+	s.T().Logf("Generated SQL: %s\n", sql)
+}
+
+func TestDMLSuite(t *testing.T) {
+	suite.Run(t, &testDMLSuite{})
 }

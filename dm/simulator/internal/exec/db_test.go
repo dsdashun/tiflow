@@ -20,12 +20,23 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/tiflow/dm/pkg/log"
 )
 
-func TestParallelTrx(t *testing.T) {
+type testDBExecSuite struct {
+	suite.Suite
+}
+
+func (s *testDBExecSuite) SetupSuite() {
+	assert.Nil(s.T(), log.InitLogger(&log.Config{}))
+}
+
+func (s *testDBExecSuite) TestParallelTrx() {
 	var err error
 	db, mock, err := sqlmock.New()
-	assert.Nil(t, err)
+	assert.Nil(s.T(), err)
 	theDBExec := NewDBExec(db)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -36,7 +47,7 @@ func TestParallelTrx(t *testing.T) {
 		defer mockLock.Unlock()
 		mock.ExpectBegin()
 		txID, err := theDBExec.BeginTx(ctx)
-		assert.Nil(t, err)
+		assert.Nil(s.T(), err)
 		return txID
 	}
 	commitFn := func(txID uint32) {
@@ -44,14 +55,14 @@ func TestParallelTrx(t *testing.T) {
 		defer mockLock.Unlock()
 		mock.ExpectCommit()
 		err := theDBExec.Commit(txID)
-		assert.Nil(t, err)
+		assert.Nil(s.T(), err)
 	}
 	rollbackFn := func(txID uint32) {
 		mockLock.Lock()
 		defer mockLock.Unlock()
 		mock.ExpectRollback()
 		err := theDBExec.Rollback(txID)
-		assert.Nil(t, err)
+		assert.Nil(s.T(), err)
 	}
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
@@ -60,12 +71,16 @@ func TestParallelTrx(t *testing.T) {
 			defer wg.Done()
 			txID1 := beginTxFn()
 			txID2 := beginTxFn()
-			t.Logf("tx ID1: %d; tx ID2: %d\n", txID1, txID2)
+			s.T().Logf("tx ID1: %d; tx ID2: %d\n", txID1, txID2)
 			commitFn(txID1)
-			t.Logf("tx ID %d committed\n", txID1)
+			s.T().Logf("tx ID %d committed\n", txID1)
 			rollbackFn(txID2)
-			t.Logf("tx ID %d rollbacked\n", txID2)
+			s.T().Logf("tx ID %d rollbacked\n", txID2)
 		}()
 	}
 	wg.Wait()
+}
+
+func TestDBExecSuite(t *testing.T) {
+	suite.Run(t, &testDBExecSuite{})
 }

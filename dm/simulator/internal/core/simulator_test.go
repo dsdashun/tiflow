@@ -21,7 +21,9 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/exec"
 	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
 )
@@ -50,24 +52,32 @@ func (e *dummyExec) ExecContext(ctx context.Context, txID uint32, query string, 
 	return nil, nil
 }
 
-func TestSimulatorBasic(t *testing.T) {
+type testSimulatorSuite struct {
+	suite.Suite
+}
+
+func (s *testSimulatorSuite) SetupSuite() {
+	assert.Nil(s.T(), log.InitLogger(&log.Config{}))
+}
+
+func (s *testSimulatorSuite) TestSimulatorBasic() {
 	// theExec := &dummyExec{}
 	db, err := sql.Open("mysql", "root:guanliyuanmima@tcp(127.0.0.1:13306)/games")
 	// db, err := sql.Open("mysql", "root:@tcp(rms-staging.pingcap.net:31469)/games")
 	if err != nil {
-		t.Fatalf("open testing DB failed: %v\n", err)
+		s.T().Fatalf("open testing DB failed: %v\n", err)
 	}
 	theExec := exec.NewDBExec(db)
-	s := NewSimulatorImpl(theExec)
-	err = s.prepareData(context.Background())
-	assert.Nil(t, err)
+	theSimulator := NewSimulatorImpl(theExec)
+	err = theSimulator.prepareData(context.Background())
+	assert.Nil(s.T(), err)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	s.DoSimulation(ctx)
-	t.Logf("total executed trx: %d\n", s.totalExecutedTrx)
+	theSimulator.DoSimulation(ctx)
+	s.T().Logf("total executed trx: %d\n", theSimulator.totalExecutedTrx)
 }
 
-func TestSingleSimulation(t *testing.T) {
+func (s *testSimulatorSuite) TestSingleSimulation() {
 	var (
 		err error
 		uk  *sqlgen.UniqueKey
@@ -82,18 +92,22 @@ func TestSingleSimulation(t *testing.T) {
 		}
 		theExec := exec.NewDBExec(db)
 	*/
-	s := NewSimulatorImpl(theExec)
+	theSimulator := NewSimulatorImpl(theExec)
 	// err = s.prepareData(ctx)
-	assert.Nil(t, err)
-	txID, err := s.sqlExec.BeginTx(ctx)
-	assert.Nil(t, err)
-	uk, err = s.simulateInsert(ctx, txID)
-	assert.Nil(t, err)
-	t.Logf("new UK: %v\n", uk)
-	err = s.simulateUpdate(ctx, txID)
-	assert.Nil(t, err)
-	err = s.simulateDelete(ctx, txID)
-	assert.Nil(t, err)
-	err = s.sqlExec.Commit(txID)
-	assert.Nil(t, err)
+	assert.Nil(s.T(), err)
+	txID, err := theSimulator.sqlExec.BeginTx(ctx)
+	assert.Nil(s.T(), err)
+	uk, err = theSimulator.simulateInsert(ctx, txID)
+	assert.Nil(s.T(), err)
+	s.T().Logf("new UK: %v\n", uk)
+	err = theSimulator.simulateUpdate(ctx, txID)
+	assert.Nil(s.T(), err)
+	err = theSimulator.simulateDelete(ctx, txID)
+	assert.Nil(s.T(), err)
+	err = theSimulator.sqlExec.Commit(txID)
+	assert.Nil(s.T(), err)
+}
+
+func TestSimulatorSuite(t *testing.T) {
+	suite.Run(t, &testSimulatorSuite{})
 }

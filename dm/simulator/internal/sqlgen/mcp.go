@@ -66,16 +66,6 @@ func (mcp *ModificationCandidatePool) NextUK() *UniqueKey {
 	return result
 }
 
-func (mcp *ModificationCandidatePool) NewEmptyUK() *UniqueKey {
-	newUK := &UniqueKey{
-		RowID: -1,
-		Value: map[string]interface{}{
-			"id": nil,
-		},
-	}
-	return newUK
-}
-
 func (mcp *ModificationCandidatePool) GetUKByRowID(rowID int) *UniqueKey {
 	mcp.RLock()
 	defer mcp.RUnlock()
@@ -140,4 +130,8 @@ func (mcp *ModificationCandidatePool) DeleteUK(uk *UniqueKey) error {
 	mcp.keyPool[curLen-1] = deletedUK
 	mcp.keyPool = mcp.keyPool[:curLen-1]
 	return nil
+}
+
+func (mcp *ModificationCandidatePool) Reset() {
+	mcp.keyPool = mcp.keyPool[:0]
 }

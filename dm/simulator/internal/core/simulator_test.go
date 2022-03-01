@@ -19,57 +19,75 @@ import (
 	"testing"
 	"time"
 
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/chaos-mesh/go-sqlsmith/types"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/tiflow/dm/pkg/log"
-	"github.com/pingcap/tiflow/dm/simulator/internal/exec"
 	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
 )
 
-type dummyExec struct {
-	totalExecuted    int
-	trxTotalExecuted int
-}
-
-func (e *dummyExec) BeginTx(ctx context.Context) (uint32, error) {
-	return 1, nil
-}
-
-func (e *dummyExec) Commit(txID uint32) error {
-	e.trxTotalExecuted++
-	return nil
-}
-
-func (e *dummyExec) Rollback(txID uint32) error {
-	return nil
-}
-
-func (e *dummyExec) ExecContext(ctx context.Context, txID uint32, query string, args ...interface{}) (sql.Result, error) {
-	// fmt.Printf("executing: %s; arguments: %v\n", query, args)
-	e.totalExecuted++
-	return nil, nil
-}
-
 type testSimulatorSuite struct {
 	suite.Suite
+	tableInfo *types.Table
+	ukColumns map[string]*types.Column
 }
 
 func (s *testSimulatorSuite) SetupSuite() {
 	assert.Nil(s.T(), log.InitLogger(&log.Config{}))
+	s.tableInfo = &types.Table{
+		DB:    "games",
+		Table: "members",
+		Type:  "BASE TABLE",
+		Columns: map[string]*types.Column{
+			"id": &types.Column{
+				DB:       "games",
+				Table:    "members",
+				Column:   "id",
+				DataType: "int",
+				DataLen:  11,
+			},
+			"name": &types.Column{
+				DB:       "games",
+				Table:    "members",
+				Column:   "name",
+				DataType: "varchar",
+				DataLen:  255,
+			},
+			"age": &types.Column{
+				DB:       "games",
+				Table:    "members",
+				Column:   "age",
+				DataType: "int",
+				DataLen:  11,
+			},
+			"team_id": &types.Column{
+				DB:       "games",
+				Table:    "members",
+				Column:   "team_id",
+				DataType: "int",
+				DataLen:  11,
+			},
+		},
+	}
+	s.ukColumns = map[string]*types.Column{
+		"id": s.tableInfo.Columns["id"],
+	}
 }
 
 func (s *testSimulatorSuite) TestSimulatorBasic() {
-	// theExec := &dummyExec{}
 	db, err := sql.Open("mysql", "root:guanliyuanmima@tcp(127.0.0.1:13306)/games")
 	// db, err := sql.Open("mysql", "root:@tcp(rms-staging.pingcap.net:31469)/games")
 	if err != nil {
 		s.T().Fatalf("open testing DB failed: %v\n", err)
 	}
-	theExec := exec.NewDBExec(db)
-	theSimulator := NewSimulatorImpl(theExec)
-	err = theSimulator.prepareData(context.Background())
+	sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableInfo, s.ukColumns)
+	theSimulator := NewSimulatorImpl(db, sqlGen)
+	err = theSimulator.prepareData(context.Background(), 128)
+	assert.Nil(s.T(), err)
+	err = theSimulator.loadMCP(context.Background())
 	assert.Nil(s.T(), err)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -80,31 +98,55 @@ func (s *testSimulatorSuite) TestSimulatorBasic() {
 func (s *testSimulatorSuite) TestSingleSimulation() {
 	var (
 		err error
+		sql string
 		uk  *sqlgen.UniqueKey
 	)
+	prepareDataRecord := 128
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	theExec := &dummyExec{}
-	/*
-		db, err := sql.Open("mysql", "root:guanliyuanmima@tcp(127.0.0.1:13306)/games")
-		if err != nil {
-			t.Fatalf("open testing DB failed: %v\n", err)
-		}
-		theExec := exec.NewDBExec(db)
-	*/
-	theSimulator := NewSimulatorImpl(theExec)
-	// err = s.prepareData(ctx)
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		s.T().Fatalf("open testing DB failed: %v\n", err)
+	}
+	sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableInfo, s.ukColumns)
+	theSimulator := NewSimulatorImpl(db, sqlGen)
+	mock.ExpectBegin()
+	sql, err = theSimulator.sqlGen.GenTruncateTable()
+	if err != nil {
+		s.T().Fatalf("generate truncate table error: %v\n", err)
+	}
+	mock.ExpectExec(sql).WillReturnResult(sqlmock.NewResult(0, int64(prepareDataRecord)))
+	expectRows := sqlmock.NewRows([]string{"id"})
+	for i := 0; i < prepareDataRecord; i++ {
+		mock.ExpectExec("^INSERT (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
+		expectRows.AddRow(i)
+	}
+	mock.ExpectCommit()
+	err = theSimulator.prepareData(context.Background(), prepareDataRecord)
 	assert.Nil(s.T(), err)
-	txID, err := theSimulator.sqlExec.BeginTx(ctx)
+
+	sql, _, err = theSimulator.sqlGen.GenLoadUniqueKeySQL()
+	if err != nil {
+		s.T().Fatalf("generate truncate table error: %v\n", err)
+	}
+	mock.ExpectQuery(sql).WillReturnRows(expectRows)
+	err = theSimulator.loadMCP(context.Background())
 	assert.Nil(s.T(), err)
-	uk, err = theSimulator.simulateInsert(ctx, txID)
+	mock.ExpectBegin()
+	tx, err := theSimulator.db.BeginTx(ctx, nil)
+	assert.Nil(s.T(), err)
+	mock.ExpectExec("^INSERT (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
+	uk, err = theSimulator.simulateInsert(ctx, tx)
 	assert.Nil(s.T(), err)
 	s.T().Logf("new UK: %v\n", uk)
-	err = theSimulator.simulateUpdate(ctx, txID)
+	mock.ExpectExec("^UPDATE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
+	err = theSimulator.simulateUpdate(ctx, tx)
 	assert.Nil(s.T(), err)
-	err = theSimulator.simulateDelete(ctx, txID)
+	mock.ExpectExec("^DELETE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
+	err = theSimulator.simulateDelete(ctx, tx)
 	assert.Nil(s.T(), err)
-	err = theSimulator.sqlExec.Commit(txID)
+	mock.ExpectCommit()
+	err = tx.Commit()
 	assert.Nil(s.T(), err)
 }
 

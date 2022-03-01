@@ -16,29 +16,79 @@ package sqlgen
 import (
 	"testing"
 
+	"github.com/chaos-mesh/go-sqlsmith/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/tiflow/dm/pkg/log"
 )
 
-type testDMLSuite struct {
+type testSQLGenImplSuite struct {
 	suite.Suite
+	tableInfo *types.Table
+	ukColumns map[string]*types.Column
 }
 
-func (s *testDMLSuite) SetupSuite() {
+func (s *testSQLGenImplSuite) SetupSuite() {
 	assert.Nil(s.T(), log.InitLogger(&log.Config{}))
+	s.tableInfo = &types.Table{
+		DB:    "games",
+		Table: "members",
+		Type:  "BASE TABLE",
+		Columns: map[string]*types.Column{
+			"id": &types.Column{
+				DB:       "games",
+				Table:    "members",
+				Column:   "id",
+				DataType: "int",
+				DataLen:  11,
+			},
+			"name": &types.Column{
+				DB:       "games",
+				Table:    "members",
+				Column:   "name",
+				DataType: "varchar",
+				DataLen:  255,
+			},
+			"age": &types.Column{
+				DB:       "games",
+				Table:    "members",
+				Column:   "age",
+				DataType: "int",
+				DataLen:  11,
+			},
+			"team_id": &types.Column{
+				DB:       "games",
+				Table:    "members",
+				Column:   "team_id",
+				DataType: "int",
+				DataLen:  11,
+			},
+		},
+	}
+	s.ukColumns = map[string]*types.Column{
+		"id": s.tableInfo.Columns["id"],
+	}
 }
 
-func (s *testDMLSuite) TestDMLBasic() {
+func (s *testSQLGenImplSuite) TestDMLBasic() {
 	var (
 		err error
 		sql string
 		uk  *UniqueKey
 	)
-	g := NewDMLSQLGenerator()
+	g := NewSQLGeneratorImpl(s.tableInfo, s.ukColumns)
 	mcp := NewModificationCandidatePool()
 	mcp.PreparePool()
+
+	sql, _, err = g.GenLoadUniqueKeySQL()
+	assert.Nil(s.T(), err)
+	s.T().Logf("Generated SELECT SQL: %s\n", sql)
+
+	sql, err = g.GenTruncateTable()
+	assert.Nil(s.T(), err)
+	s.T().Logf("Generated Truncate Table SQL: %s\n", sql)
+
 	var ukIter UniqueKeyIterator = mcp
 	for i := 0; i < 10; i++ {
 		uk = ukIter.NextUK()
@@ -55,13 +105,13 @@ func (s *testDMLSuite) TestDMLBasic() {
 	}
 }
 
-func (s *testDMLSuite) TestDMLAbnormalUK() {
+func (s *testSQLGenImplSuite) TestDMLAbnormalUK() {
 	var (
 		sql string
 		err error
 		uk  *UniqueKey
 	)
-	g := NewDMLSQLGenerator()
+	g := NewSQLGeneratorImpl(s.tableInfo, s.ukColumns)
 	uk = &UniqueKey{
 		RowID: -1,
 		Value: map[string]interface{}{
@@ -88,6 +138,6 @@ func (s *testDMLSuite) TestDMLAbnormalUK() {
 	s.T().Logf("Generated SQL: %s\n", sql)
 }
 
-func TestDMLSuite(t *testing.T) {
-	suite.Run(t, &testDMLSuite{})
+func TestSQLGenImplSuite(t *testing.T) {
+	suite.Run(t, &testSQLGenImplSuite{})
 }

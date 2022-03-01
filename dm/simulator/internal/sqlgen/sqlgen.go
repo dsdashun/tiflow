@@ -13,6 +13,8 @@
 
 package sqlgen
 
+import "github.com/chaos-mesh/go-sqlsmith/types"
+
 type DMLType int
 
 const (
@@ -22,7 +24,9 @@ const (
 	DELETE_DMLType
 )
 
-type DMLSQLGenerator interface {
+type SQLGenerator interface {
+	GenTruncateTable() (string, error)
+	GenLoadUniqueKeySQL() (string, []*types.Column, error)
 	GenInsertRow() (string, *UniqueKey, error)
 	GenUpdateRow(*UniqueKey) (string, error)
 	GenDeleteRow(*UniqueKey) (string, error)

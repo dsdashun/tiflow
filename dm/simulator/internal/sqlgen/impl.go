@@ -1,78 +1,50 @@
-// Copyright 2022 PingCAP, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package sqlgen
 
 import (
+	"strings"
+
 	"github.com/chaos-mesh/go-sqlsmith/types"
 	"github.com/chaos-mesh/go-sqlsmith/util"
 	"github.com/pingcap/tidb/parser/ast"
+	"github.com/pingcap/tidb/parser/format"
 	"github.com/pingcap/tidb/parser/model"
 	"github.com/pingcap/tidb/parser/opcode"
 	_ "github.com/pingcap/tidb/types/parser_driver"
 )
 
-type dmlSQLGenerator struct {
+type sqlGeneratorImpl struct {
 	tableInfo *types.Table
 	ukColumns map[string]*types.Column
 }
 
-func NewDMLSQLGenerator() *dmlSQLGenerator {
-	tableInfo := &types.Table{
-		DB:    "games",
-		Table: "members",
-		Type:  "BASE TABLE",
-		Columns: map[string]*types.Column{
-			"id": &types.Column{
-				DB:       "games",
-				Table:    "members",
-				Column:   "id",
-				DataType: "int",
-				DataLen:  11,
-			},
-			"name": &types.Column{
-				DB:       "games",
-				Table:    "members",
-				Column:   "name",
-				DataType: "varchar",
-				DataLen:  255,
-			},
-			"age": &types.Column{
-				DB:       "games",
-				Table:    "members",
-				Column:   "age",
-				DataType: "int",
-				DataLen:  11,
-			},
-			"team_id": &types.Column{
-				DB:       "games",
-				Table:    "members",
-				Column:   "team_id",
-				DataType: "int",
-				DataLen:  11,
-			},
-		},
-	}
-	ukColumns := map[string]*types.Column{
-		"id": tableInfo.Columns["id"],
-	}
-	return &dmlSQLGenerator{
+func NewSQLGeneratorImpl(tableInfo *types.Table, ukColumns map[string]*types.Column) *sqlGeneratorImpl {
+	return &sqlGeneratorImpl{
 		tableInfo: tableInfo,
 		ukColumns: ukColumns,
 	}
 }
 
-func (g *dmlSQLGenerator) generateWhereClause(theUK map[string]interface{}) ast.ExprNode {
+// outputString parser ast node to SQL string
+func outputString(node ast.Node) (string, error) {
+	var sb strings.Builder
+	err := node.Restore(format.NewRestoreCtx(format.DefaultRestoreFlags, &sb))
+	if err != nil {
+		return "", err
+	}
+	return sb.String(), nil
+}
+
+func (g *sqlGeneratorImpl) GenTruncateTable() (string, error) {
+	truncateTree := &ast.TruncateTableStmt{
+		Table: &ast.TableName{
+			Schema: model.NewCIStr(g.tableInfo.DB),
+			Name:   model.NewCIStr(g.tableInfo.Table),
+		},
+	}
+	return outputString(truncateTree)
+}
+
+func (g *sqlGeneratorImpl) generateWhereClause(theUK map[string]interface{}) ast.ExprNode {
 	compareExprs := make([]*ast.BinaryOperationExpr, 0)
 	for colName, val := range theUK {
 		keyColumn := g.tableInfo.Columns[colName]
@@ -104,7 +76,7 @@ func generateCompoundBinaryOpExpr(compExprs []*ast.BinaryOperationExpr) ast.Expr
 	}
 }
 
-func (g *dmlSQLGenerator) GenUpdateRow(theUK *UniqueKey) (string, error) {
+func (g *sqlGeneratorImpl) GenUpdateRow(theUK *UniqueKey) (string, error) {
 	ukValues := make(map[string]interface{})
 	// check the input UK's correctness.  Currently only check the column name
 	for _, colDef := range g.ukColumns {
@@ -138,10 +110,10 @@ func (g *dmlSQLGenerator) GenUpdateRow(theUK *UniqueKey) (string, error) {
 		},
 		Where: g.generateWhereClause(ukValues),
 	}
-	return util.BufferOut(updateTree)
+	return outputString(updateTree)
 }
 
-func (g *dmlSQLGenerator) GenInsertRow() (string, *UniqueKey, error) {
+func (g *sqlGeneratorImpl) GenInsertRow() (string, *UniqueKey, error) {
 	ukValues := make(map[string]interface{})
 	columnNames := []*ast.ColumnName{}
 	values := []ast.ExprNode{}
@@ -167,7 +139,7 @@ func (g *dmlSQLGenerator) GenInsertRow() (string, *UniqueKey, error) {
 		Lists:   [][]ast.ExprNode{values},
 		Columns: columnNames,
 	}
-	sql, err := util.BufferOut(insertTree)
+	sql, err := outputString(insertTree)
 	if err != nil {
 		return "", nil, err
 	} else {
@@ -180,7 +152,7 @@ func (g *dmlSQLGenerator) GenInsertRow() (string, *UniqueKey, error) {
 	}
 }
 
-func (g *dmlSQLGenerator) GenDeleteRow(theUK *UniqueKey) (string, error) {
+func (g *sqlGeneratorImpl) GenDeleteRow(theUK *UniqueKey) (string, error) {
 	ukValues := make(map[string]interface{})
 	// check the input UK's correctness.  Currently only check the column name
 	for _, colDef := range g.ukColumns {
@@ -201,5 +173,41 @@ func (g *dmlSQLGenerator) GenDeleteRow(theUK *UniqueKey) (string, error) {
 		},
 		Where: g.generateWhereClause(ukValues),
 	}
-	return util.BufferOut(updateTree)
+	return outputString(updateTree)
+}
+
+func (g *sqlGeneratorImpl) GenLoadUniqueKeySQL() (string, []*types.Column, error) {
+	selectFields := make([]*ast.SelectField, 0)
+	cols := make([]*types.Column, 0)
+	for _, ukCol := range g.ukColumns {
+		selectFields = append(selectFields, &ast.SelectField{
+			Expr: &ast.ColumnNameExpr{
+				Name: &ast.ColumnName{
+					Name: model.NewCIStr(ukCol.Column),
+				},
+			},
+		})
+		cols = append(cols, ukCol)
+	}
+	selectTree := &ast.SelectStmt{
+		SelectStmtOpts: &ast.SelectStmtOpts{
+			SQLCache: true,
+		},
+		Fields: &ast.FieldList{
+			Fields: selectFields,
+		},
+		From: &ast.TableRefsClause{
+			TableRefs: &ast.Join{
+				Left: &ast.TableName{
+					Schema: model.NewCIStr(g.tableInfo.DB),
+					Name:   model.NewCIStr(g.tableInfo.Table),
+				},
+			},
+		},
+	}
+	sql, err := outputString(selectTree)
+	if err != nil {
+		return "", nil, err
+	}
+	return sql, cols, nil
 }

@@ -17,4 +17,7 @@ import (
 	"errors"
 )
 
-var ErrNoMCPData error = errors.New("no MCP data")
+var (
+	ErrNoMCPData             error = errors.New("no MCP data")
+	ErrUnsupportedColumnType error = errors.New("unsupported column type")
+)

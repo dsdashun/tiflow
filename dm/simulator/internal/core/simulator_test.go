@@ -85,9 +85,9 @@ func (s *testSimulatorSuite) TestSimulatorBasic() {
 	}
 	sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableInfo, s.ukColumns)
 	theSimulator := NewSimulatorImpl(db, sqlGen)
-	err = theSimulator.prepareData(context.Background(), 128)
+	err = theSimulator.PrepareData(context.Background(), 128)
 	assert.Nil(s.T(), err)
-	err = theSimulator.loadMCP(context.Background())
+	err = theSimulator.LoadMCP(context.Background())
 	assert.Nil(s.T(), err)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -122,7 +122,7 @@ func (s *testSimulatorSuite) TestSingleSimulation() {
 		expectRows.AddRow(i)
 	}
 	mock.ExpectCommit()
-	err = theSimulator.prepareData(context.Background(), prepareDataRecord)
+	err = theSimulator.PrepareData(context.Background(), prepareDataRecord)
 	assert.Nil(s.T(), err)
 
 	sql, _, err = theSimulator.sqlGen.GenLoadUniqueKeySQL()
@@ -130,7 +130,7 @@ func (s *testSimulatorSuite) TestSingleSimulation() {
 		s.T().Fatalf("generate truncate table error: %v\n", err)
 	}
 	mock.ExpectQuery(sql).WillReturnRows(expectRows)
-	err = theSimulator.loadMCP(context.Background())
+	err = theSimulator.LoadMCP(context.Background())
 	assert.Nil(s.T(), err)
 	mock.ExpectBegin()
 	tx, err := theSimulator.db.BeginTx(ctx, nil)

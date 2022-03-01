@@ -19,9 +19,10 @@ import (
 	"math/rand"
 	"sync/atomic"
 
+	"github.com/chaos-mesh/go-sqlsmith/types"
+	"github.com/pingcap/errors"
 	"go.uber.org/zap"
 
-	"github.com/chaos-mesh/go-sqlsmith/types"
 	"github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
 )
@@ -50,21 +51,22 @@ func (s *simulatorImpl) DoSimulation(ctx context.Context) {
 		default:
 			// continue
 		}
-		s.simulateTrx(ctx)
+		err := s.simulateTrx(ctx)
+		if err != nil {
+			log.L().Error("simulate a trx error", zap.Error(err))
+		}
 	}
 }
 
-func (s *simulatorImpl) loadMCP(ctx context.Context) error {
+func (s *simulatorImpl) LoadMCP(ctx context.Context) error {
 	var err error
 	sql, colMetas, err := s.sqlGen.GenLoadUniqueKeySQL()
 	if err != nil {
-		log.L().Error("generate load unique key SQL error", zap.Error(err))
-		return err
+		return errors.Annotate(err, "generate load unique key SQL error")
 	}
 	rows, err := s.db.QueryContext(ctx, sql)
 	if err != nil {
-		log.L().Error("execute load UK SQL error", zap.Error(err))
-		return err
+		return errors.Annotate(err, "execute load Unique SQL error")
 	}
 	s.mcp.Reset()
 	for rows.Next() {
@@ -76,14 +78,13 @@ func (s *simulatorImpl) loadMCP(ctx context.Context) error {
 					zap.String("column_name", colMeta.Column),
 					zap.String("data_type", colMeta.DataType),
 				)
-				return ErrUnsupportedColumnType
+				return errors.Trace(ErrUnsupportedColumnType)
 			}
 			values = append(values, valHolder)
 		}
 		err = rows.Scan(values...)
 		if err != nil {
-			log.L().Error("scan values error", zap.Error(err))
-			return err
+			return errors.Annotate(err, "scan values error")
 		}
 		ukValue := make(map[string]interface{})
 		for i, v := range values {
@@ -98,8 +99,7 @@ func (s *simulatorImpl) loadMCP(ctx context.Context) error {
 		log.L().Debug("add UK value to the pool", zap.Any("uk", theUK))
 	}
 	if rows.Err() != nil {
-		log.L().Error("fetch rows has error", zap.Error(err))
-		return err
+		return errors.Annotate(err, "fetch rows has error")
 	}
 	return nil
 }
@@ -126,7 +126,7 @@ func getValueHolderValue(valueHolder interface{}) interface{} {
 	}
 }
 
-func (s *simulatorImpl) prepareData(ctx context.Context, recordCount int) error {
+func (s *simulatorImpl) PrepareData(ctx context.Context, recordCount int) error {
 	var (
 		err error
 		sql string
@@ -134,15 +134,15 @@ func (s *simulatorImpl) prepareData(ctx context.Context, recordCount int) error 
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return errors.Annotate(err, "begin trx for preparing data error")
 	}
 	sql, err = s.sqlGen.GenTruncateTable()
 	if err != nil {
-		return err
+		return errors.Annotate(err, "generate truncate table SQL error")
 	}
 	_, err = tx.ExecContext(ctx, sql)
 	if err != nil {
-		return err
+		return errors.Annotate(err, "execute truncate table SQL error")
 	}
 	for i := 0; i < recordCount; i++ {
 		sql, _, err = s.sqlGen.GenInsertRow()
@@ -163,36 +163,32 @@ func (s *simulatorImpl) simulateTrx(ctx context.Context) error {
 	var err error
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return errors.Annotate(err, "begin trx error when simulating a trx")
 	}
 	dmlType := randType()
 	switch dmlType {
 	case sqlgen.INSERT_DMLType:
 		_, err = s.simulateInsert(ctx, tx)
 		if err != nil {
-			log.L().Error("simulate INSERT error", zap.Error(err))
 			tx.Rollback()
-			return err
+			return errors.Annotate(err, "simulate INSERT error")
 		}
 	case sqlgen.DELETE_DMLType:
 		err = s.simulateDelete(ctx, tx)
 		if err != nil {
-			log.L().Error("simulate DELETE error", zap.Error(err))
 			tx.Rollback()
-			return err
+			return errors.Annotate(err, "simulate DELETE error")
 		}
 	default:
 		err = s.simulateUpdate(ctx, tx)
 		if err != nil {
-			log.L().Error("simulate UPDATE error", zap.Error(err))
 			tx.Rollback()
-			return err
+			return errors.Annotate(err, "simulate UPDATE error")
 		}
 	}
 	err = tx.Commit()
 	if err != nil {
-		log.L().Error("transaction COMMIT error", zap.Error(err))
-		return err
+		return errors.Annotate(err, "trx COMMIT error when simulating a trx")
 	}
 	atomic.AddUint64(&s.totalExecutedTrx, 1)
 	return nil
@@ -201,13 +197,16 @@ func (s *simulatorImpl) simulateTrx(ctx context.Context) error {
 func (s *simulatorImpl) simulateInsert(ctx context.Context, tx *sql.Tx) (*sqlgen.UniqueKey, error) {
 	var err error
 	sql, uk, err := s.sqlGen.GenInsertRow()
+	if err != nil {
+		return nil, errors.Annotate(err, "generate INSERT SQL error")
+	}
 	_, err = tx.ExecContext(ctx, sql)
 	if err != nil {
-		return nil, err
+		return nil, errors.Annotate(err, "execute INSERT SQL error")
 	}
 	err = s.mcp.AddUK(uk)
 	if err != nil {
-		return nil, err
+		return nil, errors.Annotate(err, "add new UK to MCP error")
 	}
 	return uk, nil
 }
@@ -216,19 +215,19 @@ func (s *simulatorImpl) simulateDelete(ctx context.Context, tx *sql.Tx) error {
 	var err error
 	uk := s.mcp.NextUK()
 	if uk == nil {
-		return ErrNoMCPData
+		return errors.Trace(ErrNoMCPData)
 	}
 	sql, err := s.sqlGen.GenDeleteRow(uk)
 	if err != nil {
-		return err
+		return errors.Annotate(err, "generate DELETE SQL error")
 	}
 	_, err = tx.ExecContext(ctx, sql)
 	if err != nil {
-		return err
+		return errors.Annotate(err, "execute DELETE SQL error")
 	}
 	err = s.mcp.DeleteUK(uk)
 	if err != nil {
-		return err
+		return errors.Annotate(err, "delete UK from MCP error")
 	}
 	return nil
 }
@@ -237,15 +236,15 @@ func (s *simulatorImpl) simulateUpdate(ctx context.Context, tx *sql.Tx) error {
 	var err error
 	uk := s.mcp.NextUK()
 	if uk == nil {
-		return ErrNoMCPData
+		return errors.Trace(ErrNoMCPData)
 	}
 	sql, err := s.sqlGen.GenUpdateRow(uk)
 	if err != nil {
-		return err
+		return errors.Annotate(err, "generate UPDATE SQL error")
 	}
 	_, err = tx.ExecContext(ctx, sql)
 	if err != nil {
-		return err
+		return errors.Annotate(err, "execute UPDATE SQL error")
 	}
 	return nil
 }

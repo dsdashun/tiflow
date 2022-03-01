@@ -17,6 +17,8 @@ import (
 	"math/rand"
 	"sync"
 	"time"
+
+	"github.com/pingcap/errors"
 )
 
 var (
@@ -86,7 +88,7 @@ func (mcp *ModificationCandidatePool) AddUK(uk *UniqueKey) error {
 	mcp.Lock()
 	defer mcp.Unlock()
 	if len(mcp.keyPool)+1 > cap(mcp.keyPool) {
-		return ErrMCPCapacityFull
+		return errors.Trace(ErrMCPCapacityFull)
 	}
 	currentLen := len(mcp.keyPool)
 	clonedUK := uk.Clone()
@@ -107,7 +109,7 @@ func (mcp *ModificationCandidatePool) DeleteUK(uk *UniqueKey) error {
 	defer mcp.Unlock()
 	if uk.RowID >= 0 {
 		if uk.RowID >= len(mcp.keyPool) {
-			return ErrInvalidRowID
+			return errors.Trace(ErrInvalidRowID)
 		}
 		deletedUK = mcp.keyPool[uk.RowID]
 		deleteIdx = uk.RowID
@@ -121,7 +123,7 @@ func (mcp *ModificationCandidatePool) DeleteUK(uk *UniqueKey) error {
 		}
 	}
 	if deleteIdx < 0 {
-		return ErrDeleteUKNotFound
+		return errors.Trace(ErrDeleteUKNotFound)
 	}
 	curLen := len(mcp.keyPool)
 	lastUK := mcp.keyPool[curLen-1].Clone()

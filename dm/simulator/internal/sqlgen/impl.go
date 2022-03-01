@@ -5,6 +5,7 @@ import (
 
 	"github.com/chaos-mesh/go-sqlsmith/types"
 	"github.com/chaos-mesh/go-sqlsmith/util"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/parser/ast"
 	"github.com/pingcap/tidb/parser/format"
 	"github.com/pingcap/tidb/parser/model"
@@ -29,7 +30,7 @@ func outputString(node ast.Node) (string, error) {
 	var sb strings.Builder
 	err := node.Restore(format.NewRestoreCtx(format.DefaultRestoreFlags, &sb))
 	if err != nil {
-		return "", err
+		return "", errors.Annotate(err, "restore AST into SQL string error")
 	}
 	return sb.String(), nil
 }
@@ -82,7 +83,7 @@ func (g *sqlGeneratorImpl) GenUpdateRow(theUK *UniqueKey) (string, error) {
 	for _, colDef := range g.ukColumns {
 		ukVal, ok := theUK.Value[colDef.Column]
 		if !ok {
-			return "", ErrUKColumnsMismatch
+			return "", errors.Trace(ErrUKColumnsMismatch)
 		}
 		ukValues[colDef.Column] = ukVal
 	}
@@ -141,7 +142,7 @@ func (g *sqlGeneratorImpl) GenInsertRow() (string, *UniqueKey, error) {
 	}
 	sql, err := outputString(insertTree)
 	if err != nil {
-		return "", nil, err
+		return "", nil, errors.Annotate(err, "output INSERT AST into SQL string error")
 	} else {
 		return sql,
 			&UniqueKey{
@@ -158,7 +159,7 @@ func (g *sqlGeneratorImpl) GenDeleteRow(theUK *UniqueKey) (string, error) {
 	for _, colDef := range g.ukColumns {
 		ukVal, ok := theUK.Value[colDef.Column]
 		if !ok {
-			return "", ErrUKColumnsMismatch
+			return "", errors.Trace(ErrUKColumnsMismatch)
 		}
 		ukValues[colDef.Column] = ukVal
 	}
@@ -207,7 +208,7 @@ func (g *sqlGeneratorImpl) GenLoadUniqueKeySQL() (string, []*types.Column, error
 	}
 	sql, err := outputString(selectTree)
 	if err != nil {
-		return "", nil, err
+		return "", nil, errors.Annotate(err, "output SELECT AST into SQL string error")
 	}
 	return sql, cols, nil
 }

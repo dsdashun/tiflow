@@ -16,11 +16,14 @@ package sqlgen
 import (
 	"fmt"
 	"strings"
+	"sync"
 )
 
 type UniqueKey struct {
-	RowID int
-	Value map[string]interface{}
+	sync.RWMutex
+	OPLock sync.Mutex
+	RowID  int
+	Value  map[string]interface{}
 }
 
 func (uk *UniqueKey) Clone() *UniqueKey {
@@ -28,6 +31,8 @@ func (uk *UniqueKey) Clone() *UniqueKey {
 		RowID: uk.RowID,
 		Value: map[string]interface{}{},
 	}
+	uk.RLock()
+	defer uk.RUnlock()
 	for k, v := range uk.Value {
 		result.Value[k] = v
 	}
@@ -35,6 +40,8 @@ func (uk *UniqueKey) Clone() *UniqueKey {
 }
 
 func (uk *UniqueKey) String() string {
+	uk.RLock()
+	defer uk.RUnlock()
 	var b strings.Builder
 	fmt.Fprintf(&b, "{ RowID: %d, ", uk.RowID)
 	fmt.Fprintf(&b, "Keys: ( ")
@@ -46,6 +53,8 @@ func (uk *UniqueKey) String() string {
 }
 
 func (uk *UniqueKey) IsValueEqual(otherUK *UniqueKey) bool {
+	uk.RLock()
+	defer uk.RUnlock()
 	if otherUK == nil {
 		return false
 	}

@@ -184,6 +184,8 @@ func (s *workloadSimulatorImpl) simulateInsert(ctx context.Context, tx *sql.Tx) 
 	if err != nil {
 		return nil, errors.Annotate(err, "generate INSERT SQL error")
 	}
+	uk.OPLock.Lock()
+	defer uk.OPLock.Unlock()
 	_, err = tx.ExecContext(ctx, sql)
 	if err != nil {
 		return nil, errors.Annotate(err, "execute INSERT SQL error")
@@ -201,6 +203,8 @@ func (s *workloadSimulatorImpl) simulateDelete(ctx context.Context, tx *sql.Tx) 
 	if uk == nil {
 		return errors.Trace(ErrNoMCPData)
 	}
+	uk.OPLock.Lock()
+	defer uk.OPLock.Unlock()
 	sql, err := s.sqlGen.GenDeleteRow(uk)
 	if err != nil {
 		return errors.Annotate(err, "generate DELETE SQL error")
@@ -222,6 +226,8 @@ func (s *workloadSimulatorImpl) simulateUpdate(ctx context.Context, tx *sql.Tx) 
 	if uk == nil {
 		return errors.Trace(ErrNoMCPData)
 	}
+	uk.OPLock.Lock()
+	defer uk.OPLock.Unlock()
 	sql, err := s.sqlGen.GenUpdateRow(uk)
 	if err != nil {
 		return errors.Annotate(err, "generate UPDATE SQL error")

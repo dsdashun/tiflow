@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"sync"
+	"time"
 
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -10,6 +11,23 @@ import (
 	"github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/utils"
 )
+
+func workerFn(ctx context.Context, workloadCh <-chan WorkloadSimulator) {
+	for {
+		select {
+		case <-ctx.Done():
+			log.L().Info("worker context is terminated")
+			return
+		case theWorkload := <-workloadCh:
+			err := theWorkload.SimulateTrx(ctx)
+			if err != nil {
+				log.L().Error("simulate a trx error", zap.Error(err))
+			}
+		case <-time.After(100 * time.Millisecond):
+			//continue on
+		}
+	}
+}
 
 type DBSimulator struct {
 	sync.RWMutex
@@ -19,6 +37,7 @@ type DBSimulator struct {
 	workloadSimulators map[string]WorkloadSimulator
 	ctx                context.Context
 	cancel             func()
+	workerCh           chan WorkloadSimulator
 }
 
 func NewDBSimulator() *DBSimulator {
@@ -48,6 +67,16 @@ func (s *DBSimulator) StartSimulation(ctx context.Context) error {
 		s.Lock()
 		defer s.Unlock()
 		s.ctx, s.cancel = context.WithCancel(ctx)
+		workerCount := 4
+		s.wg.Add(workerCount)
+		s.workerCh = make(chan WorkloadSimulator, workerCount)
+		for i := 0; i < workerCount; i++ {
+			go func() {
+				defer s.wg.Done()
+				workerFn(s.ctx, s.workerCh)
+				log.L().Info("worker exit")
+			}()
+		}
 		s.wg.Add(1)
 		go func(ctx context.Context) {
 			defer s.wg.Done()
@@ -57,7 +86,7 @@ func (s *DBSimulator) StartSimulation(ctx context.Context) error {
 					log.L().Info("context is done")
 					return
 				default:
-					s.DoSimulation(s.ctx)
+					s.DoSimulation(ctx)
 				}
 			}
 		}(s.ctx)
@@ -104,10 +133,7 @@ func (s *DBSimulator) DoSimulation(ctx context.Context) {
 				workloadName := utils.RandomChooseKeyByWeights(weightMap)
 				return s.workloadSimulators[workloadName]
 			}()
-			err := theWorkload.SimulateTrx(ctx)
-			if err != nil {
-				log.L().Error("simulate a trx error", zap.Error(err))
-			}
+			s.workerCh <- theWorkload
 		}
 	}
 }

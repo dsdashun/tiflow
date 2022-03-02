@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/tiflow/dm/pkg/log"
+	"go.uber.org/zap"
 )
 
 var (
@@ -63,9 +65,7 @@ func (mcp *ModificationCandidatePool) NextUK() *UniqueKey {
 		return nil
 	}
 	idx := gMCPRand.Intn(len(mcp.keyPool))
-	result := mcp.keyPool[idx].Clone()
-	result.RowID = idx
-	return result
+	return mcp.keyPool[idx] // pass by reference
 }
 
 func (mcp *ModificationCandidatePool) GetUKByRowID(rowID int) *UniqueKey {
@@ -107,12 +107,15 @@ func (mcp *ModificationCandidatePool) DeleteUK(uk *UniqueKey) error {
 	}
 	mcp.Lock()
 	defer mcp.Unlock()
-	if uk.RowID >= 0 {
-		if uk.RowID >= len(mcp.keyPool) {
+	uk.RLock()
+	deleteIdx = uk.RowID
+	uk.RUnlock()
+	if deleteIdx >= 0 {
+		if deleteIdx >= len(mcp.keyPool) {
+			log.L().Error("the delete UK row ID > MCP's total length", zap.Int("delete row ID", deleteIdx), zap.Int("current key pool length", len(mcp.keyPool)))
 			return errors.Trace(ErrInvalidRowID)
 		}
-		deletedUK = mcp.keyPool[uk.RowID]
-		deleteIdx = uk.RowID
+		deletedUK = mcp.keyPool[deleteIdx]
 	} else {
 		for i, searchUK := range mcp.keyPool {
 			if searchUK.IsValueEqual(uk) {
@@ -126,8 +129,10 @@ func (mcp *ModificationCandidatePool) DeleteUK(uk *UniqueKey) error {
 		return errors.Trace(ErrDeleteUKNotFound)
 	}
 	curLen := len(mcp.keyPool)
-	lastUK := mcp.keyPool[curLen-1].Clone()
+	lastUK := mcp.keyPool[curLen-1]
+	lastUK.Lock()
 	lastUK.RowID = deleteIdx
+	lastUK.Unlock()
 	mcp.keyPool[deleteIdx] = lastUK
 	mcp.keyPool[curLen-1] = deletedUK
 	mcp.keyPool = mcp.keyPool[:curLen-1]

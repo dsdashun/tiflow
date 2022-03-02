@@ -94,10 +94,11 @@ func main() {
 		return
 	}
 	sqlGen := sqlgen.NewSQLGeneratorImpl(tableInfo, ukColumns)
-	theSimulator := core.NewSimulatorImpl(db, sqlGen)
+	tableSimu := core.NewWorkloadSimulatorImpl(db, sqlGen)
+	theSimulator := core.NewDBSimulator()
 
 	plog.L().Info("begin to prepare table data")
-	err = theSimulator.PrepareData(context.Background(), 4096)
+	err = tableSimu.PrepareData(context.Background(), 4096)
 	if err != nil {
 		plog.L().Error("prepare table data failed", zap.Error(err))
 		gerr = err
@@ -105,16 +106,31 @@ func main() {
 	}
 	plog.L().Info("prepare table data [DONE]")
 	plog.L().Info("begin to load UKs into MCP")
-	err = theSimulator.LoadMCP(context.Background())
+	err = tableSimu.LoadMCP(context.Background())
 	if err != nil {
 		plog.L().Error("load UKs of table into MCP failed", zap.Error(err))
 		gerr = err
 		return
 	}
 	plog.L().Info("loading UKs into MCP [DONE]")
+
+	plog.L().Info("add the workload into simulator")
+	theSimulator.AddWorkload("games.members/RANDOM", tableSimu)
+
 	plog.L().Info("start simulation")
-	theSimulator.DoSimulation(ctx)
+	err = theSimulator.StartSimulation(ctx)
+	if err != nil {
+		plog.L().Error("start simulation failed", zap.Error(err))
+		gerr = err
+		return
+	}
 	<-ctx.Done()
 	plog.L().Info("simulation terminated")
+	err = theSimulator.StopSimulation()
+	if err != nil {
+		plog.L().Error("stop simulation failed", zap.Error(err))
+		gerr = err
+		return
+	}
 	plog.L().Info("main exit")
 }

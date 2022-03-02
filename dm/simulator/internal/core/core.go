@@ -16,5 +16,10 @@ package core
 import "context"
 
 type Simulator interface {
-	DoSimulation(ctx context.Context)
+	StartSimulation(ctx context.Context) error
+	StopSimulation() error
+}
+
+type WorkloadSimulator interface {
+	SimulateTrx(ctx context.Context) error
 }

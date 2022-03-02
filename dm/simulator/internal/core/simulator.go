@@ -1,262 +1,113 @@
-// Copyright 2022 PingCAP, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package core
 
 import (
 	"context"
-	"database/sql"
-	"math/rand"
-	"sync/atomic"
+	"sync"
 
-	"github.com/chaos-mesh/go-sqlsmith/types"
-	"github.com/pingcap/errors"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/tiflow/dm/pkg/log"
-	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
+	"github.com/pingcap/tiflow/dm/simulator/internal/utils"
 )
 
-type simulatorImpl struct {
-	sqlGen           sqlgen.SQLGenerator
-	db               *sql.DB
-	mcp              *sqlgen.ModificationCandidatePool
-	totalExecutedTrx uint64
+type DBSimulator struct {
+	sync.RWMutex
+	isRunning          atomic.Bool
+	wg                 sync.WaitGroup
+	workloadLock       sync.RWMutex
+	workloadSimulators map[string]WorkloadSimulator
+	ctx                context.Context
+	cancel             func()
 }
 
-func NewSimulatorImpl(db *sql.DB, sqlGen sqlgen.SQLGenerator) *simulatorImpl {
-	return &simulatorImpl{
-		db:     db,
-		sqlGen: sqlGen,
-		mcp:    sqlgen.NewModificationCandidatePool(),
+func NewDBSimulator() *DBSimulator {
+	return &DBSimulator{
+		workloadSimulators: make(map[string]WorkloadSimulator),
 	}
 }
 
-func (s *simulatorImpl) DoSimulation(ctx context.Context) {
+func (s *DBSimulator) AddWorkload(workloadName string, ts WorkloadSimulator) {
+	s.workloadLock.Lock()
+	defer s.workloadLock.Unlock()
+	s.workloadSimulators[workloadName] = ts
+}
+
+func (s *DBSimulator) RemoveWorkload(workloadName string) {
+	s.workloadLock.Lock()
+	defer s.workloadLock.Unlock()
+	delete(s.workloadSimulators, workloadName)
+}
+
+func (s *DBSimulator) StartSimulation(ctx context.Context) error {
+	if s.isRunning.Load() {
+		log.L().Info("the DB simulator has already been started")
+		return nil
+	}
+	return func() error {
+		s.Lock()
+		defer s.Unlock()
+		s.ctx, s.cancel = context.WithCancel(ctx)
+		s.wg.Add(1)
+		go func(ctx context.Context) {
+			defer s.wg.Done()
+			for s.isRunning.Load() {
+				select {
+				case <-ctx.Done():
+					log.L().Info("context is done")
+					return
+				default:
+					s.DoSimulation(s.ctx)
+				}
+			}
+		}(s.ctx)
+		s.isRunning.Store(true)
+		log.L().Info("the DB simulator has been started")
+		return nil
+	}()
+}
+
+func (s *DBSimulator) StopSimulation() error {
+	if !s.isRunning.Load() {
+		log.L().Info("the server has already been closed")
+		return nil
+	}
+	//atomic operations on closing the server
+	log.L().Info("begin to stop the DB simulator")
+	func() {
+		s.Lock()
+		defer s.Unlock()
+		s.cancel()
+		log.L().Info("begin to wait all the goroutines to finish")
+		s.wg.Wait() //wait all sub-goroutines finished
+		log.L().Info("all the goroutines finished")
+		s.isRunning.Store(false)
+		log.L().Info("the DB simulator is stopped")
+	}()
+	return nil
+}
+
+func (s *DBSimulator) DoSimulation(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			log.L().Info("context expired, simulation terminated")
 			return
 		default:
-			// continue
-		}
-		err := s.simulateTrx(ctx)
-		if err != nil {
-			log.L().Error("simulate a trx error", zap.Error(err))
-		}
-	}
-}
-
-func (s *simulatorImpl) LoadMCP(ctx context.Context) error {
-	var err error
-	sql, colMetas, err := s.sqlGen.GenLoadUniqueKeySQL()
-	if err != nil {
-		return errors.Annotate(err, "generate load unique key SQL error")
-	}
-	rows, err := s.db.QueryContext(ctx, sql)
-	if err != nil {
-		return errors.Annotate(err, "execute load Unique SQL error")
-	}
-	s.mcp.Reset()
-	for rows.Next() {
-		values := make([]interface{}, 0)
-		for _, colMeta := range colMetas {
-			valHolder := newColValueHolder(colMeta)
-			if valHolder == nil {
-				log.L().Error("unsupported data type",
-					zap.String("column_name", colMeta.Column),
-					zap.String("data_type", colMeta.DataType),
-				)
-				return errors.Trace(ErrUnsupportedColumnType)
+			theWorkload := func() WorkloadSimulator {
+				s.workloadLock.RLock()
+				defer s.workloadLock.RUnlock()
+				weightMap := make(map[string]int)
+				for tableName := range s.workloadSimulators {
+					weightMap[tableName] = 1
+				}
+				workloadName := utils.RandomChooseKeyByWeights(weightMap)
+				return s.workloadSimulators[workloadName]
+			}()
+			err := theWorkload.SimulateTrx(ctx)
+			if err != nil {
+				log.L().Error("simulate a trx error", zap.Error(err))
 			}
-			values = append(values, valHolder)
 		}
-		err = rows.Scan(values...)
-		if err != nil {
-			return errors.Annotate(err, "scan values error")
-		}
-		ukValue := make(map[string]interface{})
-		for i, v := range values {
-			colMeta := colMetas[i]
-			ukValue[colMeta.Column] = getValueHolderValue(v)
-		}
-		theUK := &sqlgen.UniqueKey{
-			RowID: -1,
-			Value: ukValue,
-		}
-		s.mcp.AddUK(theUK)
-		log.L().Debug("add UK value to the pool", zap.Any("uk", theUK))
-	}
-	if rows.Err() != nil {
-		return errors.Annotate(err, "fetch rows has error")
-	}
-	return nil
-}
-
-func newColValueHolder(colMeta *types.Column) interface{} {
-	switch colMeta.DataType {
-	case "int":
-		return new(int)
-	case "varchar":
-		return new(string)
-	default:
-		return nil
-	}
-}
-
-func getValueHolderValue(valueHolder interface{}) interface{} {
-	switch vh := valueHolder.(type) {
-	case *int:
-		return *vh
-	case *string:
-		return *vh
-	default:
-		return nil
-	}
-}
-
-func (s *simulatorImpl) PrepareData(ctx context.Context, recordCount int) error {
-	var (
-		err error
-		sql string
-	)
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return errors.Annotate(err, "begin trx for preparing data error")
-	}
-	sql, err = s.sqlGen.GenTruncateTable()
-	if err != nil {
-		return errors.Annotate(err, "generate truncate table SQL error")
-	}
-	_, err = tx.ExecContext(ctx, sql)
-	if err != nil {
-		return errors.Annotate(err, "execute truncate table SQL error")
-	}
-	for i := 0; i < recordCount; i++ {
-		sql, _, err = s.sqlGen.GenInsertRow()
-		if err != nil {
-			log.L().Error("generate INSERT SQL error", zap.Error(err))
-			continue
-		}
-		_, err = tx.ExecContext(ctx, sql)
-		if err != nil {
-			log.L().Error("execute SQL error", zap.Error(err))
-			continue
-		}
-	}
-	return tx.Commit()
-}
-
-func (s *simulatorImpl) simulateTrx(ctx context.Context) error {
-	var err error
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return errors.Annotate(err, "begin trx error when simulating a trx")
-	}
-	dmlType := randType()
-	switch dmlType {
-	case sqlgen.INSERT_DMLType:
-		_, err = s.simulateInsert(ctx, tx)
-		if err != nil {
-			tx.Rollback()
-			return errors.Annotate(err, "simulate INSERT error")
-		}
-	case sqlgen.DELETE_DMLType:
-		err = s.simulateDelete(ctx, tx)
-		if err != nil {
-			tx.Rollback()
-			return errors.Annotate(err, "simulate DELETE error")
-		}
-	default:
-		err = s.simulateUpdate(ctx, tx)
-		if err != nil {
-			tx.Rollback()
-			return errors.Annotate(err, "simulate UPDATE error")
-		}
-	}
-	err = tx.Commit()
-	if err != nil {
-		return errors.Annotate(err, "trx COMMIT error when simulating a trx")
-	}
-	atomic.AddUint64(&s.totalExecutedTrx, 1)
-	return nil
-}
-
-func (s *simulatorImpl) simulateInsert(ctx context.Context, tx *sql.Tx) (*sqlgen.UniqueKey, error) {
-	var err error
-	sql, uk, err := s.sqlGen.GenInsertRow()
-	if err != nil {
-		return nil, errors.Annotate(err, "generate INSERT SQL error")
-	}
-	_, err = tx.ExecContext(ctx, sql)
-	if err != nil {
-		return nil, errors.Annotate(err, "execute INSERT SQL error")
-	}
-	err = s.mcp.AddUK(uk)
-	if err != nil {
-		return nil, errors.Annotate(err, "add new UK to MCP error")
-	}
-	return uk, nil
-}
-
-func (s *simulatorImpl) simulateDelete(ctx context.Context, tx *sql.Tx) error {
-	var err error
-	uk := s.mcp.NextUK()
-	if uk == nil {
-		return errors.Trace(ErrNoMCPData)
-	}
-	sql, err := s.sqlGen.GenDeleteRow(uk)
-	if err != nil {
-		return errors.Annotate(err, "generate DELETE SQL error")
-	}
-	_, err = tx.ExecContext(ctx, sql)
-	if err != nil {
-		return errors.Annotate(err, "execute DELETE SQL error")
-	}
-	err = s.mcp.DeleteUK(uk)
-	if err != nil {
-		return errors.Annotate(err, "delete UK from MCP error")
-	}
-	return nil
-}
-
-func (s *simulatorImpl) simulateUpdate(ctx context.Context, tx *sql.Tx) error {
-	var err error
-	uk := s.mcp.NextUK()
-	if uk == nil {
-		return errors.Trace(ErrNoMCPData)
-	}
-	sql, err := s.sqlGen.GenUpdateRow(uk)
-	if err != nil {
-		return errors.Annotate(err, "generate UPDATE SQL error")
-	}
-	_, err = tx.ExecContext(ctx, sql)
-	if err != nil {
-		return errors.Annotate(err, "execute UPDATE SQL error")
-	}
-	return nil
-}
-
-func randType() sqlgen.DMLType {
-	randNum := rand.Int() % 4
-	switch randNum {
-	case 0:
-		return sqlgen.INSERT_DMLType
-	case 1:
-		return sqlgen.DELETE_DMLType
-	default:
-		return sqlgen.UPDATE_DMLType
 	}
 }

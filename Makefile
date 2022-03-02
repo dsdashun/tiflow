@@ -1,7 +1,7 @@
 ### Makefile for ticdc
 .PHONY: build test check clean fmt cdc kafka_consumer coverage \
 	integration_test_build integration_test integration_test_mysql integration_test_kafka bank \
-	dm dm-master dm-worker dmctl dm-syncer dm_coverage
+	dm dm-master dm-worker dmctl dm-syncer dm_coverage dm-simulator
 
 PROJECT=tiflow
 P=3
@@ -267,6 +267,10 @@ dm-chaos-case:
 
 dm_debug-tools:
 	$(GOBUILD) -ldflags '$(LDFLAGS)' -o bin/binlog-event-blackhole ./dm/debug-tools/binlog-event-blackhole
+
+dm-simulator:
+	$(GOBUILD) -ldflags '$(LDFLAGS)' -o bin/dm-simulator ./dm/simulator/cmd/dm-simulator
+
 
 dm_generate_proto: tools/bin/protoc-gen-gogofaster tools/bin/protoc-gen-grpc-gateway
 	./dm/generate-dm.sh

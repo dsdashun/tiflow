@@ -19,11 +19,11 @@ import (
 	"math/rand"
 	"sync/atomic"
 
-	"github.com/chaos-mesh/go-sqlsmith/types"
 	"github.com/pingcap/errors"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/tiflow/dm/pkg/log"
+	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
 )
 
@@ -59,7 +59,7 @@ func (s *workloadSimulatorImpl) LoadMCP(ctx context.Context) error {
 			valHolder := newColValueHolder(colMeta)
 			if valHolder == nil {
 				log.L().Error("unsupported data type",
-					zap.String("column_name", colMeta.Column),
+					zap.String("column_name", colMeta.ColumnName),
 					zap.String("data_type", colMeta.DataType),
 				)
 				return errors.Trace(ErrUnsupportedColumnType)
@@ -73,7 +73,7 @@ func (s *workloadSimulatorImpl) LoadMCP(ctx context.Context) error {
 		ukValue := make(map[string]interface{})
 		for i, v := range values {
 			colMeta := colMetas[i]
-			ukValue[colMeta.Column] = getValueHolderValue(v)
+			ukValue[colMeta.ColumnName] = getValueHolderValue(v)
 		}
 		theUK := &sqlgen.UniqueKey{
 			RowID: -1,
@@ -88,7 +88,7 @@ func (s *workloadSimulatorImpl) LoadMCP(ctx context.Context) error {
 	return nil
 }
 
-func newColValueHolder(colMeta *types.Column) interface{} {
+func newColValueHolder(colMeta *config.ColumnDefinition) interface{} {
 	switch colMeta.DataType {
 	case "int":
 		return new(int)

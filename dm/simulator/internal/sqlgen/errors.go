@@ -18,8 +18,10 @@ import (
 )
 
 var (
-	ErrMCPCapacityFull   = errors.New("the capacity of the modification candidate pool is full")
-	ErrInvalidRowID      = errors.New("invalid row ID")
-	ErrDeleteUKNotFound  = errors.New("delete UK not found")
-	ErrUKColumnsMismatch = errors.New("UK columns mismatch")
+	ErrMCPCapacityFull       = errors.New("the capacity of the modification candidate pool is full")
+	ErrInvalidRowID          = errors.New("invalid row ID")
+	ErrDeleteUKNotFound      = errors.New("delete UK not found")
+	ErrUKColumnsMismatch     = errors.New("UK columns mismatch")
+	ErrUKColValueNotProvided = errors.New("some UK column values are not provided")
+	ErrMissingUKValue        = errors.New("missing the UK values")
 )

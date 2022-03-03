@@ -16,58 +16,46 @@ package sqlgen
 import (
 	"testing"
 
-	"github.com/chaos-mesh/go-sqlsmith/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/tiflow/dm/pkg/log"
+	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 )
 
 type testSQLGenImplSuite struct {
 	suite.Suite
-	tableInfo *types.Table
-	ukColumns map[string]*types.Column
+	tableConfig *config.TableConfig
 }
 
 func (s *testSQLGenImplSuite) SetupSuite() {
 	assert.Nil(s.T(), log.InitLogger(&log.Config{}))
-	s.tableInfo = &types.Table{
-		DB:    "games",
-		Table: "members",
-		Type:  "BASE TABLE",
-		Columns: map[string]*types.Column{
-			"id": &types.Column{
-				DB:       "games",
-				Table:    "members",
-				Column:   "id",
-				DataType: "int",
-				DataLen:  11,
+	s.tableConfig = &config.TableConfig{
+		DatabaseName: "games",
+		TableName:    "members",
+		Columns: []*config.ColumnDefinition{
+			&config.ColumnDefinition{
+				ColumnName: "id",
+				DataType:   "int",
+				DataLen:    11,
 			},
-			"name": &types.Column{
-				DB:       "games",
-				Table:    "members",
-				Column:   "name",
-				DataType: "varchar",
-				DataLen:  255,
+			&config.ColumnDefinition{
+				ColumnName: "name",
+				DataType:   "varchar",
+				DataLen:    255,
 			},
-			"age": &types.Column{
-				DB:       "games",
-				Table:    "members",
-				Column:   "age",
-				DataType: "int",
-				DataLen:  11,
+			&config.ColumnDefinition{
+				ColumnName: "age",
+				DataType:   "int",
+				DataLen:    11,
 			},
-			"team_id": &types.Column{
-				DB:       "games",
-				Table:    "members",
-				Column:   "team_id",
-				DataType: "int",
-				DataLen:  11,
+			&config.ColumnDefinition{
+				ColumnName: "team_id",
+				DataType:   "int",
+				DataLen:    11,
 			},
 		},
-	}
-	s.ukColumns = map[string]*types.Column{
-		"id": s.tableInfo.Columns["id"],
+		UniqueKeyColumnNames: []string{"id"},
 	}
 }
 
@@ -77,7 +65,7 @@ func (s *testSQLGenImplSuite) TestDMLBasic() {
 		sql string
 		uk  *UniqueKey
 	)
-	g := NewSQLGeneratorImpl(s.tableInfo, s.ukColumns)
+	g := NewSQLGeneratorImpl(s.tableConfig)
 	mcp := NewModificationCandidatePool()
 	mcp.PreparePool()
 
@@ -111,7 +99,7 @@ func (s *testSQLGenImplSuite) TestDMLAbnormalUK() {
 		err error
 		uk  *UniqueKey
 	)
-	g := NewSQLGeneratorImpl(s.tableInfo, s.ukColumns)
+	g := NewSQLGeneratorImpl(s.tableConfig)
 	uk = &UniqueKey{
 		RowID: -1,
 		Value: map[string]interface{}{

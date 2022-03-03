@@ -78,25 +78,6 @@ func (s *testDBSimulatorSuite) TestChooseWorkload() {
 	assert.Equal(s.T(), w3.TotalExecuted, w3CurrentExecuted, "workload 03 should keep the executed count")
 }
 
-/*
-func (s *testDBSimulatorSuite) TestSimulationLoopBasic() {
-	simu := NewDBSimulator()
-	w1 := &dummyWorkload{
-		Name: "workload01",
-	}
-	w2 := &dummyWorkload{
-		Name: "workload02",
-	}
-	simu.AddWorkload("w1", w1)
-	simu.AddWorkload("w2", w2)
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-	simu.DoSimulation(ctx)
-	assert.Greater(s.T(), w1.TotalExecuted, 0, "workload 01 should at least execute once")
-	assert.Greater(s.T(), w2.TotalExecuted, 0, "workload 02 should at least execute once")
-}
-*/
-
 func (s *testDBSimulatorSuite) TestStartStopSimulation() {
 	var err error
 	ctx, cancel := context.WithCancel(context.Background())

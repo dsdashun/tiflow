@@ -19,61 +19,49 @@ import (
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
-	"github.com/chaos-mesh/go-sqlsmith/types"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/tiflow/dm/pkg/log"
+	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
 )
 
 type testWorkloadSimulatorSuite struct {
 	suite.Suite
-	tableInfo *types.Table
-	ukColumns map[string]*types.Column
-	mcp       *sqlgen.ModificationCandidatePool
+	tableConfig *config.TableConfig
+	mcp         *sqlgen.ModificationCandidatePool
 }
 
 func (s *testWorkloadSimulatorSuite) SetupSuite() {
 	assert.Nil(s.T(), log.InitLogger(&log.Config{}))
-	s.tableInfo = &types.Table{
-		DB:    "games",
-		Table: "members",
-		Type:  "BASE TABLE",
-		Columns: map[string]*types.Column{
-			"id": &types.Column{
-				DB:       "games",
-				Table:    "members",
-				Column:   "id",
-				DataType: "int",
-				DataLen:  11,
+	s.tableConfig = &config.TableConfig{
+		DatabaseName: "games",
+		TableName:    "members",
+		Columns: []*config.ColumnDefinition{
+			&config.ColumnDefinition{
+				ColumnName: "id",
+				DataType:   "int",
+				DataLen:    11,
 			},
-			"name": &types.Column{
-				DB:       "games",
-				Table:    "members",
-				Column:   "name",
-				DataType: "varchar",
-				DataLen:  255,
+			&config.ColumnDefinition{
+				ColumnName: "name",
+				DataType:   "varchar",
+				DataLen:    255,
 			},
-			"age": &types.Column{
-				DB:       "games",
-				Table:    "members",
-				Column:   "age",
-				DataType: "int",
-				DataLen:  11,
+			&config.ColumnDefinition{
+				ColumnName: "age",
+				DataType:   "int",
+				DataLen:    11,
 			},
-			"team_id": &types.Column{
-				DB:       "games",
-				Table:    "members",
-				Column:   "team_id",
-				DataType: "int",
-				DataLen:  11,
+			&config.ColumnDefinition{
+				ColumnName: "team_id",
+				DataType:   "int",
+				DataLen:    11,
 			},
 		},
-	}
-	s.ukColumns = map[string]*types.Column{
-		"id": s.tableInfo.Columns["id"],
+		UniqueKeyColumnNames: []string{"id"},
 	}
 }
 
@@ -84,7 +72,7 @@ func (s *testWorkloadSimulatorSuite) SetupTest() {
 	if err != nil {
 		s.T().Fatalf("open testing DB failed: %v\n", err)
 	}
-	sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableInfo, s.ukColumns)
+	sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableConfig)
 	theSimulator := NewWorkloadSimulatorImpl(db, sqlGen)
 	recordCount := 128
 	mockPrepareData(mock, recordCount)
@@ -127,7 +115,7 @@ func (s *testWorkloadSimulatorSuite) TestBasic() {
 	if err != nil {
 		s.T().Fatalf("open testing DB failed: %v\n", err)
 	}
-	sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableInfo, s.ukColumns)
+	sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableConfig)
 	theSimulator := NewWorkloadSimulatorImpl(db, sqlGen)
 	theSimulator.mcp = s.mcp //replace prepared MCP
 	for i := 0; i < 100; i++ {
@@ -149,7 +137,7 @@ func (s *testWorkloadSimulatorSuite) TestSingleSimulation() {
 	if err != nil {
 		s.T().Fatalf("open testing DB failed: %v\n", err)
 	}
-	sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableInfo, s.ukColumns)
+	sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableConfig)
 	theSimulator := NewWorkloadSimulatorImpl(db, sqlGen)
 	theSimulator.mcp = s.mcp //replace prepared MCP
 
@@ -192,7 +180,7 @@ func (s *testWorkloadSimulatorSuite) TestParallelSimulation() {
 			s.T().Logf("open testing DB failed: %v\n", err)
 			return err
 		}
-		sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableInfo, s.ukColumns)
+		sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableConfig)
 		theSimulator := NewWorkloadSimulatorImpl(db, sqlGen)
 		theSimulator.mcp = s.mcp //replace prepared MCP, workers share the same MCP
 

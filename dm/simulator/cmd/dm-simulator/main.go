@@ -3,15 +3,18 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/chaos-mesh/go-sqlsmith/types"
+	"github.com/pingcap/errors"
+	flag "github.com/spf13/pflag"
 	"go.uber.org/zap"
 
 	plog "github.com/pingcap/tiflow/dm/pkg/log"
+	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 	"github.com/pingcap/tiflow/dm/simulator/internal/core"
 	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
 )
@@ -21,6 +24,7 @@ func main() {
 		err  error
 		gerr error
 	)
+	plog.InitLogger(&plog.Config{})
 	defer func() {
 		err = plog.L().Sync()
 		if err != nil {
@@ -30,7 +34,22 @@ func main() {
 			os.Exit(1)
 		}
 	}()
-	plog.InitLogger(&plog.Config{})
+	cliConfig := config.NewCLIConfig()
+	flag.Parse()
+	if cliConfig.IsHelp {
+		flag.Usage()
+		os.Exit(0)
+	}
+	if len(cliConfig.ConfigFile) == 0 {
+		fmt.Fprintln(os.Stderr, "config file is empty")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	theConfig, err := config.NewConfigFromFile(cliConfig.ConfigFile)
+	if err != nil {
+		log.Fatalf("new config from file error: %v\n", err)
+	}
 	// this context is for the main function context, sending signals will cancel the context
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -48,52 +67,24 @@ func main() {
 		cancel()
 	}()
 
-	tableInfo := &types.Table{
-		DB:    "games",
-		Table: "members",
-		Type:  "BASE TABLE",
-		Columns: map[string]*types.Column{
-			"id": &types.Column{
-				DB:       "games",
-				Table:    "members",
-				Column:   "id",
-				DataType: "int",
-				DataLen:  11,
-			},
-			"name": &types.Column{
-				DB:       "games",
-				Table:    "members",
-				Column:   "name",
-				DataType: "varchar",
-				DataLen:  255,
-			},
-			"age": &types.Column{
-				DB:       "games",
-				Table:    "members",
-				Column:   "age",
-				DataType: "int",
-				DataLen:  11,
-			},
-			"team_id": &types.Column{
-				DB:       "games",
-				Table:    "members",
-				Column:   "team_id",
-				DataType: "int",
-				DataLen:  11,
-			},
-		},
+	if len(theConfig.DataSources) == 0 {
+		gerr = errors.New("no data source provided")
+		plog.L().Error(gerr.Error())
+		return
 	}
-	ukColumns := map[string]*types.Column{
-		"id": tableInfo.Columns["id"],
-	}
-
-	db, err := sql.Open("mysql", "root:guanliyuanmima@tcp(127.0.0.1:13306)/games")
+	dbConfig := theConfig.DataSources[0]
+	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%d)/", dbConfig.UserName, dbConfig.Password, dbConfig.Host, dbConfig.Port))
 	if err != nil {
 		plog.L().Error("open testing DB failed", zap.Error(err))
 		gerr = err
 		return
 	}
-	sqlGen := sqlgen.NewSQLGeneratorImpl(tableInfo, ukColumns)
+	if len(dbConfig.Tables) == 0 {
+		gerr = errors.New("no simulating data table provided")
+		plog.L().Error(gerr.Error())
+		return
+	}
+	sqlGen := sqlgen.NewSQLGeneratorImpl(dbConfig.Tables[0])
 	tableSimu := core.NewWorkloadSimulatorImpl(db, sqlGen)
 	theSimulator := core.NewDBSimulator()
 

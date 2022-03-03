@@ -13,7 +13,7 @@
 
 package sqlgen
 
-import "github.com/chaos-mesh/go-sqlsmith/types"
+import "github.com/pingcap/tiflow/dm/simulator/internal/config"
 
 type DMLType int
 
@@ -26,7 +26,7 @@ const (
 
 type SQLGenerator interface {
 	GenTruncateTable() (string, error)
-	GenLoadUniqueKeySQL() (string, []*types.Column, error)
+	GenLoadUniqueKeySQL() (string, []*config.ColumnDefinition, error)
 	GenInsertRow() (string, *UniqueKey, error)
 	GenUpdateRow(*UniqueKey) (string, error)
 	GenDeleteRow(*UniqueKey) (string, error)

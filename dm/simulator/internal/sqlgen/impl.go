@@ -3,7 +3,6 @@ package sqlgen
 import (
 	"strings"
 
-	"github.com/chaos-mesh/go-sqlsmith/types"
 	"github.com/chaos-mesh/go-sqlsmith/util"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/parser/ast"
@@ -11,17 +10,33 @@ import (
 	"github.com/pingcap/tidb/parser/model"
 	"github.com/pingcap/tidb/parser/opcode"
 	_ "github.com/pingcap/tidb/types/parser_driver"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/tiflow/dm/pkg/log"
+	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 )
 
 type sqlGeneratorImpl struct {
-	tableInfo *types.Table
-	ukColumns map[string]*types.Column
+	tableConfig *config.TableConfig
+	columnMap   map[string]*config.ColumnDefinition
+	ukMap       map[string]struct{}
 }
 
-func NewSQLGeneratorImpl(tableInfo *types.Table, ukColumns map[string]*types.Column) *sqlGeneratorImpl {
+func NewSQLGeneratorImpl(tableConfig *config.TableConfig) *sqlGeneratorImpl {
+	colDefMap := make(map[string]*config.ColumnDefinition)
+	for _, colDef := range tableConfig.Columns {
+		colDefMap[colDef.ColumnName] = colDef
+	}
+	ukMap := make(map[string]struct{})
+	for _, ukColName := range tableConfig.UniqueKeyColumnNames {
+		if _, ok := colDefMap[ukColName]; ok {
+			ukMap[ukColName] = struct{}{}
+		}
+	}
 	return &sqlGeneratorImpl{
-		tableInfo: tableInfo,
-		ukColumns: ukColumns,
+		tableConfig: tableConfig,
+		columnMap:   colDefMap,
+		ukMap:       ukMap,
 	}
 }
 
@@ -38,28 +53,33 @@ func outputString(node ast.Node) (string, error) {
 func (g *sqlGeneratorImpl) GenTruncateTable() (string, error) {
 	truncateTree := &ast.TruncateTableStmt{
 		Table: &ast.TableName{
-			Schema: model.NewCIStr(g.tableInfo.DB),
-			Name:   model.NewCIStr(g.tableInfo.Table),
+			Schema: model.NewCIStr(g.tableConfig.DatabaseName),
+			Name:   model.NewCIStr(g.tableConfig.TableName),
 		},
 	}
 	return outputString(truncateTree)
 }
 
-func (g *sqlGeneratorImpl) generateWhereClause(theUK map[string]interface{}) ast.ExprNode {
+func (g *sqlGeneratorImpl) generateWhereClause(theUK map[string]interface{}) (ast.ExprNode, error) {
 	compareExprs := make([]*ast.BinaryOperationExpr, 0)
-	for colName, val := range theUK {
-		keyColumn := g.tableInfo.Columns[colName]
+	//iterate the existing UKs, to make sure all the uk columns has values
+	for ukColName := range g.ukMap {
+		val, ok := theUK[ukColName]
+		if !ok {
+			log.L().Error(ErrUKColValueNotProvided.Error(), zap.String("column_name", ukColName))
+			return nil, errors.Trace(ErrUKColValueNotProvided)
+		}
 		compareExprs = append(compareExprs, &ast.BinaryOperationExpr{
 			Op: opcode.EQ,
 			L: &ast.ColumnNameExpr{
 				Name: &ast.ColumnName{
-					Name: model.NewCIStr(keyColumn.Column),
+					Name: model.NewCIStr(ukColName),
 				},
 			},
 			R: ast.NewValueExpr(val, "", ""),
 		})
 	}
-	return generateCompoundBinaryOpExpr(compareExprs)
+	return generateCompoundBinaryOpExpr(compareExprs), nil
 }
 
 func generateCompoundBinaryOpExpr(compExprs []*ast.BinaryOperationExpr) ast.ExprNode {
@@ -78,38 +98,37 @@ func generateCompoundBinaryOpExpr(compExprs []*ast.BinaryOperationExpr) ast.Expr
 }
 
 func (g *sqlGeneratorImpl) GenUpdateRow(theUK *UniqueKey) (string, error) {
-	ukValues := make(map[string]interface{})
-	// check the input UK's correctness.  Currently only check the column name
-	for _, colDef := range g.ukColumns {
-		ukVal, ok := theUK.Value[colDef.Column]
-		if !ok {
-			return "", errors.Trace(ErrUKColumnsMismatch)
-		}
-		ukValues[colDef.Column] = ukVal
+	if theUK == nil {
+		return "", errors.Trace(ErrMissingUKValue)
 	}
 	assignments := make([]*ast.Assignment, 0)
-	for _, colInfo := range g.tableInfo.Columns {
-		if _, ok := g.ukColumns[colInfo.Column]; ok {
+	for _, colInfo := range g.columnMap {
+		if _, ok := g.ukMap[colInfo.ColumnName]; ok {
+			//this is a UK column, skip from modifying it
 			continue
 		}
 		assignments = append(assignments, &ast.Assignment{
 			Column: &ast.ColumnName{
-				Name: model.NewCIStr(colInfo.Column),
+				Name: model.NewCIStr(colInfo.ColumnName),
 			},
 			Expr: ast.NewValueExpr(util.GenerateDataItem(colInfo.DataType), "", ""),
 		})
+	}
+	whereClause, err := g.generateWhereClause(theUK.Value)
+	if err != nil {
+		return "", errors.Annotate(err, "generate where clause error")
 	}
 	updateTree := &ast.UpdateStmt{
 		List: assignments,
 		TableRefs: &ast.TableRefsClause{
 			TableRefs: &ast.Join{
 				Left: &ast.TableName{
-					Schema: model.NewCIStr(g.tableInfo.DB),
-					Name:   model.NewCIStr(g.tableInfo.Table),
+					Schema: model.NewCIStr(g.tableConfig.DatabaseName),
+					Name:   model.NewCIStr(g.tableConfig.TableName),
 				},
 			},
 		},
-		Where: g.generateWhereClause(ukValues),
+		Where: whereClause,
 	}
 	return outputString(updateTree)
 }
@@ -118,22 +137,23 @@ func (g *sqlGeneratorImpl) GenInsertRow() (string, *UniqueKey, error) {
 	ukValues := make(map[string]interface{})
 	columnNames := []*ast.ColumnName{}
 	values := []ast.ExprNode{}
-	for _, col := range g.tableInfo.Columns {
+	for _, col := range g.columnMap {
 		columnNames = append(columnNames, &ast.ColumnName{
-			Name: model.NewCIStr(col.Column),
+			Name: model.NewCIStr(col.ColumnName),
 		})
 		newValue := util.GenerateDataItem(col.DataType)
 		values = append(values, ast.NewValueExpr(newValue, "", ""))
-		if _, ok := g.ukColumns[col.Column]; ok {
-			ukValues[col.Column] = newValue
+		if _, ok := g.ukMap[col.ColumnName]; ok {
+			//add UK value
+			ukValues[col.ColumnName] = newValue
 		}
 	}
 	insertTree := &ast.InsertStmt{
 		Table: &ast.TableRefsClause{
 			TableRefs: &ast.Join{
 				Left: &ast.TableName{
-					Schema: model.NewCIStr(g.tableInfo.DB),
-					Name:   model.NewCIStr(g.tableInfo.Table),
+					Schema: model.NewCIStr(g.tableConfig.DatabaseName),
+					Name:   model.NewCIStr(g.tableConfig.TableName),
 				},
 			},
 		},
@@ -154,41 +174,39 @@ func (g *sqlGeneratorImpl) GenInsertRow() (string, *UniqueKey, error) {
 }
 
 func (g *sqlGeneratorImpl) GenDeleteRow(theUK *UniqueKey) (string, error) {
-	ukValues := make(map[string]interface{})
-	// check the input UK's correctness.  Currently only check the column name
-	for _, colDef := range g.ukColumns {
-		ukVal, ok := theUK.Value[colDef.Column]
-		if !ok {
-			return "", errors.Trace(ErrUKColumnsMismatch)
-		}
-		ukValues[colDef.Column] = ukVal
+	if theUK == nil {
+		return "", errors.Trace(ErrMissingUKValue)
+	}
+	whereClause, err := g.generateWhereClause(theUK.Value)
+	if err != nil {
+		return "", errors.Annotate(err, "generate where clause error")
 	}
 	updateTree := &ast.DeleteStmt{
 		TableRefs: &ast.TableRefsClause{
 			TableRefs: &ast.Join{
 				Left: &ast.TableName{
-					Schema: model.NewCIStr(g.tableInfo.DB),
-					Name:   model.NewCIStr(g.tableInfo.Table),
+					Schema: model.NewCIStr(g.tableConfig.DatabaseName),
+					Name:   model.NewCIStr(g.tableConfig.TableName),
 				},
 			},
 		},
-		Where: g.generateWhereClause(ukValues),
+		Where: whereClause,
 	}
 	return outputString(updateTree)
 }
 
-func (g *sqlGeneratorImpl) GenLoadUniqueKeySQL() (string, []*types.Column, error) {
+func (g *sqlGeneratorImpl) GenLoadUniqueKeySQL() (string, []*config.ColumnDefinition, error) {
 	selectFields := make([]*ast.SelectField, 0)
-	cols := make([]*types.Column, 0)
-	for _, ukCol := range g.ukColumns {
+	cols := make([]*config.ColumnDefinition, 0)
+	for ukColName := range g.ukMap {
 		selectFields = append(selectFields, &ast.SelectField{
 			Expr: &ast.ColumnNameExpr{
 				Name: &ast.ColumnName{
-					Name: model.NewCIStr(ukCol.Column),
+					Name: model.NewCIStr(ukColName),
 				},
 			},
 		})
-		cols = append(cols, ukCol)
+		cols = append(cols, g.columnMap[ukColName])
 	}
 	selectTree := &ast.SelectStmt{
 		SelectStmtOpts: &ast.SelectStmtOpts{
@@ -200,8 +218,8 @@ func (g *sqlGeneratorImpl) GenLoadUniqueKeySQL() (string, []*types.Column, error
 		From: &ast.TableRefsClause{
 			TableRefs: &ast.Join{
 				Left: &ast.TableName{
-					Schema: model.NewCIStr(g.tableInfo.DB),
-					Name:   model.NewCIStr(g.tableInfo.Table),
+					Schema: model.NewCIStr(g.tableConfig.DatabaseName),
+					Name:   model.NewCIStr(g.tableConfig.TableName),
 				},
 			},
 		},

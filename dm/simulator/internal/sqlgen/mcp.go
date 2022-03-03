@@ -26,6 +26,7 @@ import (
 var (
 	initRandSeedOnce sync.Once
 	gMCPRand         *rand.Rand
+	gMCPRandLock     sync.Mutex
 )
 
 func init() {
@@ -64,7 +65,9 @@ func (mcp *ModificationCandidatePool) NextUK() *UniqueKey {
 	if len(mcp.keyPool) == 0 {
 		return nil
 	}
+	gMCPRandLock.Lock()
 	idx := gMCPRand.Intn(len(mcp.keyPool))
+	gMCPRandLock.Unlock()
 	return mcp.keyPool[idx] // pass by reference
 }
 

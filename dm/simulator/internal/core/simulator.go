@@ -117,13 +117,14 @@ func (s *DBSimulator) StopSimulation() error {
 }
 
 func (s *DBSimulator) DoSimulation(ctx context.Context) {
+	var theWorkload WorkloadSimulator
 	for {
 		select {
 		case <-ctx.Done():
 			log.L().Info("context expired, simulation terminated")
 			return
 		default:
-			theWorkload := func() WorkloadSimulator {
+			theWorkload = func() WorkloadSimulator {
 				s.workloadLock.RLock()
 				defer s.workloadLock.RUnlock()
 				weightMap := make(map[string]int)
@@ -133,7 +134,12 @@ func (s *DBSimulator) DoSimulation(ctx context.Context) {
 				workloadName := utils.RandomChooseKeyByWeights(weightMap)
 				return s.workloadSimulators[workloadName]
 			}()
-			s.workerCh <- theWorkload
+		}
+		select {
+		case s.workerCh <- theWorkload:
+			//continue on
+		case <-time.After(1 * time.Second):
+			//continue on
 		}
 	}
 }

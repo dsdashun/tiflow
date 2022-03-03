@@ -240,7 +240,7 @@ func (s *workloadSimulatorImpl) simulateUpdate(ctx context.Context, tx *sql.Tx) 
 }
 
 func randType() sqlgen.DMLType {
-	randNum := rand.Int() % 4
+	randNum := rand.Intn(4)
 	switch randNum {
 	case 0:
 		return sqlgen.INSERT_DMLType

@@ -32,6 +32,7 @@ type testWorkloadSimulatorSuite struct {
 	suite.Suite
 	tableInfo *types.Table
 	ukColumns map[string]*types.Column
+	mcp       *sqlgen.ModificationCandidatePool
 }
 
 func (s *testWorkloadSimulatorSuite) SetupSuite() {
@@ -76,6 +77,25 @@ func (s *testWorkloadSimulatorSuite) SetupSuite() {
 	}
 }
 
+func (s *testWorkloadSimulatorSuite) SetupTest() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		s.T().Fatalf("open testing DB failed: %v\n", err)
+	}
+	sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableInfo, s.ukColumns)
+	theSimulator := NewWorkloadSimulatorImpl(db, sqlGen)
+	recordCount := 128
+	mockPrepareData(mock, recordCount)
+	err = theSimulator.PrepareData(ctx, recordCount)
+	assert.Nil(s.T(), err)
+	mockLoadUKs(mock, recordCount)
+	err = theSimulator.LoadMCP(ctx)
+	assert.Nil(s.T(), err)
+	s.mcp = theSimulator.mcp
+}
+
 func mockPrepareData(mock sqlmock.Sqlmock, recordCount int) {
 	mock.ExpectBegin()
 	mock.ExpectExec("^TRUNCATE TABLE (.+)").WillReturnResult(sqlmock.NewResult(0, 999))
@@ -100,23 +120,16 @@ func mockSingleDMLTrx(mock sqlmock.Sqlmock) {
 }
 
 func (s *testWorkloadSimulatorSuite) TestBasic() {
+	var err error
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	//db, err := sql.Open("mysql", "root:guanliyuanmima@tcp(127.0.0.1:13306)/games")
-	// db, err := sql.Open("mysql", "root:@tcp(rms-staging.pingcap.net:31469)/games")
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		s.T().Fatalf("open testing DB failed: %v\n", err)
 	}
 	sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableInfo, s.ukColumns)
 	theSimulator := NewWorkloadSimulatorImpl(db, sqlGen)
-	recordCount := 128
-	mockPrepareData(mock, recordCount)
-	err = theSimulator.PrepareData(ctx, recordCount)
-	assert.Nil(s.T(), err)
-	mockLoadUKs(mock, recordCount)
-	err = theSimulator.LoadMCP(ctx)
-	assert.Nil(s.T(), err)
+	theSimulator.mcp = s.mcp //replace prepared MCP
 	for i := 0; i < 100; i++ {
 		mockSingleDMLTrx(mock)
 		err = theSimulator.SimulateTrx(ctx)
@@ -128,10 +141,8 @@ func (s *testWorkloadSimulatorSuite) TestBasic() {
 func (s *testWorkloadSimulatorSuite) TestSingleSimulation() {
 	var (
 		err error
-		sql string
 		uk  *sqlgen.UniqueKey
 	)
-	prepareDataRecord := 128
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	db, mock, err := sqlmock.New()
@@ -140,31 +151,7 @@ func (s *testWorkloadSimulatorSuite) TestSingleSimulation() {
 	}
 	sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableInfo, s.ukColumns)
 	theSimulator := NewWorkloadSimulatorImpl(db, sqlGen)
-
-	//simulate prepare data
-	mock.ExpectBegin()
-	sql, err = theSimulator.sqlGen.GenTruncateTable()
-	if err != nil {
-		s.T().Fatalf("generate truncate table error: %v\n", err)
-	}
-	mock.ExpectExec(sql).WillReturnResult(sqlmock.NewResult(0, int64(prepareDataRecord)))
-	expectRows := sqlmock.NewRows([]string{"id"})
-	for i := 0; i < prepareDataRecord; i++ {
-		mock.ExpectExec("^INSERT (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
-		expectRows.AddRow(i)
-	}
-	mock.ExpectCommit()
-	err = theSimulator.PrepareData(context.Background(), prepareDataRecord)
-	assert.Nil(s.T(), err)
-
-	//load UK into the MCP
-	sql, _, err = theSimulator.sqlGen.GenLoadUniqueKeySQL()
-	if err != nil {
-		s.T().Fatalf("generate truncate table error: %v\n", err)
-	}
-	mock.ExpectQuery(sql).WillReturnRows(expectRows)
-	err = theSimulator.LoadMCP(context.Background())
-	assert.Nil(s.T(), err)
+	theSimulator.mcp = s.mcp //replace prepared MCP
 
 	//begin trx
 	mock.ExpectBegin()
@@ -191,6 +178,45 @@ func (s *testWorkloadSimulatorSuite) TestSingleSimulation() {
 	mock.ExpectCommit()
 	err = tx.Commit()
 	assert.Nil(s.T(), err)
+}
+
+func (s *testWorkloadSimulatorSuite) TestParallelSimulation() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	workerCount := 4
+	workerFn := func() error {
+		var err error
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			s.T().Logf("open testing DB failed: %v\n", err)
+			return err
+		}
+		sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableInfo, s.ukColumns)
+		theSimulator := NewWorkloadSimulatorImpl(db, sqlGen)
+		theSimulator.mcp = s.mcp //replace prepared MCP, workers share the same MCP
+
+		for i := 0; i < 100; i++ {
+			mockSingleDMLTrx(mock)
+			err = theSimulator.SimulateTrx(ctx)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	resultCh := make(chan error, workerCount)
+	defer close(resultCh)
+	for i := 0; i < workerCount; i++ {
+		go func() {
+			err := workerFn()
+			resultCh <- err
+		}()
+	}
+	for i := 0; i < workerCount; i++ {
+		err := <-resultCh
+		assert.Nil(s.T(), err)
+	}
 }
 
 func TestWorkloadSimulatorSuite(t *testing.T) {

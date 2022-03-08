@@ -87,6 +87,7 @@ func (mcp *ModificationCandidatePool) Len() int {
 	return len(mcp.keyPool)
 }
 
+// it has side effect: the UK's row ID will be changed
 func (mcp *ModificationCandidatePool) AddUK(uk *UniqueKey) error {
 	mcp.Lock()
 	defer mcp.Unlock()
@@ -94,9 +95,10 @@ func (mcp *ModificationCandidatePool) AddUK(uk *UniqueKey) error {
 		return errors.Trace(ErrMCPCapacityFull)
 	}
 	currentLen := len(mcp.keyPool)
-	clonedUK := uk.Clone()
-	clonedUK.RowID = currentLen
-	mcp.keyPool = append(mcp.keyPool, clonedUK)
+	uk.Lock()
+	uk.RowID = currentLen
+	uk.Unlock()
+	mcp.keyPool = append(mcp.keyPool, uk)
 	return nil
 }
 

@@ -14,10 +14,11 @@
 package core
 
 import (
-	"errors"
+	"github.com/pingcap/errors"
 )
 
 var (
 	ErrNoMCPData             error = errors.New("no MCP data")
 	ErrUnsupportedColumnType error = errors.New("unsupported column type")
+	ErrRowIDNotFound         error = errors.New("row ID not found")
 )

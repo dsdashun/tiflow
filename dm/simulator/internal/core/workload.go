@@ -16,7 +16,6 @@ package core
 import (
 	"context"
 	"database/sql"
-	"math/rand"
 	"sync/atomic"
 
 	"github.com/pingcap/errors"
@@ -237,16 +236,4 @@ func (s *workloadSimulatorImpl) simulateUpdate(ctx context.Context, tx *sql.Tx) 
 		return errors.Annotate(err, "execute UPDATE SQL error")
 	}
 	return nil
-}
-
-func randType() sqlgen.DMLType {
-	randNum := rand.Intn(4)
-	switch randNum {
-	case 0:
-		return sqlgen.INSERT_DMLType
-	case 1:
-		return sqlgen.DELETE_DMLType
-	default:
-		return sqlgen.UPDATE_DMLType
-	}
 }

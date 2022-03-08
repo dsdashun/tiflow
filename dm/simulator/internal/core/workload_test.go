@@ -31,12 +31,13 @@ import (
 type testWorkloadSimulatorSuite struct {
 	suite.Suite
 	tableConfig *config.TableConfig
-	mcp         *sqlgen.ModificationCandidatePool
+	mcpMap      map[string]*sqlgen.ModificationCandidatePool
 }
 
 func (s *testWorkloadSimulatorSuite) SetupSuite() {
 	assert.Nil(s.T(), log.InitLogger(&log.Config{}))
 	s.tableConfig = &config.TableConfig{
+		TableID:      "members",
 		DatabaseName: "games",
 		TableName:    "members",
 		Columns: []*config.ColumnDefinition{
@@ -63,42 +64,21 @@ func (s *testWorkloadSimulatorSuite) SetupSuite() {
 		},
 		UniqueKeyColumnNames: []string{"id"},
 	}
+	s.mcpMap = make(map[string]*sqlgen.ModificationCandidatePool)
 }
 
 func (s *testWorkloadSimulatorSuite) SetupTest() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		s.T().Fatalf("open testing DB failed: %v\n", err)
-	}
-	sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableConfig)
-	theSimulator := NewWorkloadSimulatorImpl(db, sqlGen)
+	mcp := sqlgen.NewModificationCandidatePool()
 	recordCount := 128
-	mockPrepareData(mock, recordCount)
-	err = theSimulator.PrepareData(ctx, recordCount)
-	assert.Nil(s.T(), err)
-	mockLoadUKs(mock, recordCount)
-	err = theSimulator.LoadMCP(ctx)
-	assert.Nil(s.T(), err)
-	s.mcp = theSimulator.mcp
-}
-
-func mockPrepareData(mock sqlmock.Sqlmock, recordCount int) {
-	mock.ExpectBegin()
-	mock.ExpectExec("^TRUNCATE TABLE (.+)").WillReturnResult(sqlmock.NewResult(0, 999))
 	for i := 0; i < recordCount; i++ {
-		mock.ExpectExec("^INSERT (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
+		mcp.AddUK(&sqlgen.UniqueKey{
+			RowID: -1,
+			Value: map[string]interface{}{
+				"id": rand.Int(),
+			},
+		})
 	}
-	mock.ExpectCommit()
-}
-
-func mockLoadUKs(mock sqlmock.Sqlmock, recordCount int) {
-	expectRows := sqlmock.NewRows([]string{"id"})
-	for i := 0; i < recordCount; i++ {
-		expectRows.AddRow(rand.Int())
-	}
-	mock.ExpectQuery("^SELECT").WillReturnRows(expectRows)
+	s.mcpMap["members"] = mcp
 }
 
 func mockSingleDMLTrx(mock sqlmock.Sqlmock) {
@@ -115,57 +95,19 @@ func (s *testWorkloadSimulatorSuite) TestBasic() {
 	if err != nil {
 		s.T().Fatalf("open testing DB failed: %v\n", err)
 	}
-	sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableConfig)
-	theSimulator := NewWorkloadSimulatorImpl(db, sqlGen)
-	theSimulator.mcp = s.mcp //replace prepared MCP
+	theSimulator, err := NewWorkloadSimulatorImpl(
+		map[string]*config.TableConfig{
+			"members": s.tableConfig,
+		},
+		"RANDOM-DML members;",
+	)
+	assert.Nil(s.T(), err)
 	for i := 0; i < 100; i++ {
 		mockSingleDMLTrx(mock)
-		err = theSimulator.SimulateTrx(ctx)
+		err = theSimulator.SimulateTrx(ctx, db, s.mcpMap)
 		assert.Nil(s.T(), err)
 	}
 	s.T().Logf("total executed trx: %d\n", theSimulator.totalExecutedTrx)
-}
-
-func (s *testWorkloadSimulatorSuite) TestSingleSimulation() {
-	var (
-		err error
-		uk  *sqlgen.UniqueKey
-	)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		s.T().Fatalf("open testing DB failed: %v\n", err)
-	}
-	sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableConfig)
-	theSimulator := NewWorkloadSimulatorImpl(db, sqlGen)
-	theSimulator.mcp = s.mcp //replace prepared MCP
-
-	//begin trx
-	mock.ExpectBegin()
-	tx, err := theSimulator.db.BeginTx(ctx, nil)
-	assert.Nil(s.T(), err)
-
-	//simulate INSERT
-	mock.ExpectExec("^INSERT (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
-	uk, err = theSimulator.simulateInsert(ctx, tx)
-	assert.Nil(s.T(), err)
-	s.T().Logf("new UK: %v\n", uk)
-
-	//simulate UPDATE
-	mock.ExpectExec("^UPDATE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
-	err = theSimulator.simulateUpdate(ctx, tx)
-	assert.Nil(s.T(), err)
-
-	//simulate DELETE
-	mock.ExpectExec("^DELETE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
-	err = theSimulator.simulateDelete(ctx, tx)
-	assert.Nil(s.T(), err)
-
-	//commit trx
-	mock.ExpectCommit()
-	err = tx.Commit()
-	assert.Nil(s.T(), err)
 }
 
 func (s *testWorkloadSimulatorSuite) TestParallelSimulation() {
@@ -180,13 +122,19 @@ func (s *testWorkloadSimulatorSuite) TestParallelSimulation() {
 			s.T().Logf("open testing DB failed: %v\n", err)
 			return err
 		}
-		sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableConfig)
-		theSimulator := NewWorkloadSimulatorImpl(db, sqlGen)
-		theSimulator.mcp = s.mcp //replace prepared MCP, workers share the same MCP
+		theSimulator, err := NewWorkloadSimulatorImpl(
+			map[string]*config.TableConfig{
+				"members": s.tableConfig,
+			},
+			"RANDOM-DML members;",
+		)
+		if err != nil {
+			return err
+		}
 
 		for i := 0; i < 100; i++ {
 			mockSingleDMLTrx(mock)
-			err = theSimulator.SimulateTrx(ctx)
+			err = theSimulator.SimulateTrx(ctx, db, s.mcpMap)
 			if err != nil {
 				return err
 			}

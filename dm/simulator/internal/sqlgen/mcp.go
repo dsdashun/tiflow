@@ -115,24 +115,14 @@ func (mcp *ModificationCandidatePool) DeleteUK(uk *UniqueKey) error {
 	uk.RLock()
 	deleteIdx = uk.RowID
 	uk.RUnlock()
-	if deleteIdx >= 0 {
-		if deleteIdx >= len(mcp.keyPool) {
-			log.L().Error("the delete UK row ID > MCP's total length", zap.Int("delete row ID", deleteIdx), zap.Int("current key pool length", len(mcp.keyPool)))
-			return errors.Trace(ErrInvalidRowID)
-		}
-		deletedUK = mcp.keyPool[deleteIdx]
-	} else {
-		for i, searchUK := range mcp.keyPool {
-			if searchUK.IsValueEqual(uk) {
-				deletedUK = searchUK
-				deleteIdx = i
-				break
-			}
-		}
-	}
 	if deleteIdx < 0 {
 		return errors.Trace(ErrDeleteUKNotFound)
 	}
+	if deleteIdx >= len(mcp.keyPool) {
+		log.L().Error("the delete UK row ID > MCP's total length", zap.Int("delete row ID", deleteIdx), zap.Int("current key pool length", len(mcp.keyPool)))
+		return errors.Trace(ErrInvalidRowID)
+	}
+	deletedUK = mcp.keyPool[deleteIdx]
 	curLen := len(mcp.keyPool)
 	lastUK := mcp.keyPool[curLen-1]
 	lastUK.Lock()
@@ -141,6 +131,9 @@ func (mcp *ModificationCandidatePool) DeleteUK(uk *UniqueKey) error {
 	mcp.keyPool[deleteIdx] = lastUK
 	mcp.keyPool[curLen-1] = deletedUK
 	mcp.keyPool = mcp.keyPool[:curLen-1]
+	deletedUK.Lock()
+	deletedUK.RowID = -1
+	deletedUK.Unlock()
 	return nil
 }
 

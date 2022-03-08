@@ -18,155 +18,84 @@ import (
 	"database/sql"
 	"sync/atomic"
 
+	"github.com/antlr/antlr4/runtime/Go/antlr"
 	"github.com/pingcap/errors"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/tiflow/dm/pkg/log"
+	plog "github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
+	"github.com/pingcap/tiflow/dm/simulator/internal/parser"
 	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
 )
 
 type workloadSimulatorImpl struct {
-	sqlGen           sqlgen.SQLGenerator
-	db               *sql.DB
-	mcp              *sqlgen.ModificationCandidatePool
+	steps            []DMLWorkloadStep
 	totalExecutedTrx uint64
+	tblConfigs       map[string]*config.TableConfig
 }
 
-func NewWorkloadSimulatorImpl(db *sql.DB, sqlGen sqlgen.SQLGenerator) *workloadSimulatorImpl {
-	return &workloadSimulatorImpl{
-		db:     db,
-		sqlGen: sqlGen,
-		mcp:    sqlgen.NewModificationCandidatePool(),
-	}
-}
-
-func (s *workloadSimulatorImpl) LoadMCP(ctx context.Context) error {
+func NewWorkloadSimulatorImpl(
+	tblConfigs map[string]*config.TableConfig,
+	workloadCode string,
+) (*workloadSimulatorImpl, error) {
 	var err error
-	sql, colMetas, err := s.sqlGen.GenLoadUniqueKeySQL()
-	if err != nil {
-		return errors.Annotate(err, "generate load unique key SQL error")
-	}
-	rows, err := s.db.QueryContext(ctx, sql)
-	if err != nil {
-		return errors.Annotate(err, "execute load Unique SQL error")
-	}
-	s.mcp.Reset()
-	for rows.Next() {
-		values := make([]interface{}, 0)
-		for _, colMeta := range colMetas {
-			valHolder := newColValueHolder(colMeta)
-			if valHolder == nil {
-				log.L().Error("unsupported data type",
-					zap.String("column_name", colMeta.ColumnName),
-					zap.String("data_type", colMeta.DataType),
-				)
-				return errors.Trace(ErrUnsupportedColumnType)
-			}
-			values = append(values, valHolder)
-		}
-		err = rows.Scan(values...)
-		if err != nil {
-			return errors.Annotate(err, "scan values error")
-		}
-		ukValue := make(map[string]interface{})
-		for i, v := range values {
-			colMeta := colMetas[i]
-			ukValue[colMeta.ColumnName] = getValueHolderValue(v)
-		}
-		theUK := &sqlgen.UniqueKey{
-			RowID: -1,
-			Value: ukValue,
-		}
-		s.mcp.AddUK(theUK)
-		log.L().Debug("add UK value to the pool", zap.Any("uk", theUK))
-	}
-	if rows.Err() != nil {
-		return errors.Annotate(err, "fetch rows has error")
-	}
-	return nil
-}
-
-func newColValueHolder(colMeta *config.ColumnDefinition) interface{} {
-	switch colMeta.DataType {
-	case "int":
-		return new(int)
-	case "varchar":
-		return new(string)
-	default:
-		return nil
-	}
-}
-
-func getValueHolderValue(valueHolder interface{}) interface{} {
-	switch vh := valueHolder.(type) {
-	case *int:
-		return *vh
-	case *string:
-		return *vh
-	default:
-		return nil
-	}
-}
-
-func (s *workloadSimulatorImpl) PrepareData(ctx context.Context, recordCount int) error {
-	var (
-		err error
-		sql string
+	input := antlr.NewInputStream(workloadCode)
+	lexer := parser.NewWorkloadLexer(input)
+	stream := antlr.NewCommonTokenStream(lexer, 0)
+	p := parser.NewWorkloadParser(stream)
+	el := NewParseStepsErrorListener(
+		antlr.NewDiagnosticErrorListener(true),
 	)
+	p.AddErrorListener(el)
+	p.BuildParseTrees = true
+	tree := p.WorkloadSteps()
+	sl := NewParseStepsListener(tblConfigs)
+	antlr.ParseTreeWalkerDefault.Walk(sl, tree)
+	err = el.Err()
+	if err != nil {
+		return nil, errors.Annotate(err, "parse workload DSL code error")
+	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return errors.Annotate(err, "begin trx for preparing data error")
-	}
-	sql, err = s.sqlGen.GenTruncateTable()
-	if err != nil {
-		return errors.Annotate(err, "generate truncate table SQL error")
-	}
-	_, err = tx.ExecContext(ctx, sql)
-	if err != nil {
-		return errors.Annotate(err, "execute truncate table SQL error")
-	}
-	for i := 0; i < recordCount; i++ {
-		sql, _, err = s.sqlGen.GenInsertRow()
-		if err != nil {
-			log.L().Error("generate INSERT SQL error", zap.Error(err))
+	involvedTblConfigs := make(map[string]*config.TableConfig)
+	for _, step := range sl.totalSteps {
+		tblName := step.GetTableName()
+		if _, ok := involvedTblConfigs[tblName]; ok {
 			continue
 		}
-		_, err = tx.ExecContext(ctx, sql)
-		if err != nil {
-			log.L().Error("execute SQL error", zap.Error(err))
-			continue
+		if _, ok := tblConfigs[tblName]; !ok {
+			err = ErrTableConfigNotFound
+			plog.L().Error(err.Error(), zap.String("table_name", tblName))
+			return nil, err
 		}
+		involvedTblConfigs[tblName] = tblConfigs[tblName]
 	}
-	return tx.Commit()
+
+	return &workloadSimulatorImpl{
+		steps:      sl.totalSteps,
+		tblConfigs: involvedTblConfigs,
+	}, nil
 }
 
-func (s *workloadSimulatorImpl) SimulateTrx(ctx context.Context) error {
+func (s *workloadSimulatorImpl) SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*sqlgen.ModificationCandidatePool) error {
 	var err error
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return errors.Annotate(err, "begin trx error when simulating a trx")
 	}
-	dmlType := randType()
-	switch dmlType {
-	case sqlgen.INSERT_DMLType:
-		_, err = s.simulateInsert(ctx, tx)
+
+	sctx := &DMLWorkloadStepContext{
+		tx:      tx,
+		ctx:     ctx,
+		rowRefs: make(map[string]*sqlgen.UniqueKey),
+	}
+	for _, step := range s.steps {
+		tblName := step.GetTableName()
+		mcp := mcpMap[tblName]
+		sctx.mcp = mcp
+		err = step.Execute(sctx)
 		if err != nil {
 			tx.Rollback()
-			return errors.Annotate(err, "simulate INSERT error")
-		}
-	case sqlgen.DELETE_DMLType:
-		err = s.simulateDelete(ctx, tx)
-		if err != nil {
-			tx.Rollback()
-			return errors.Annotate(err, "simulate DELETE error")
-		}
-	default:
-		err = s.simulateUpdate(ctx, tx)
-		if err != nil {
-			tx.Rollback()
-			return errors.Annotate(err, "simulate UPDATE error")
+			return errors.Annotate(err, "execute the workload step error")
 		}
 	}
 	err = tx.Commit()
@@ -177,63 +106,10 @@ func (s *workloadSimulatorImpl) SimulateTrx(ctx context.Context) error {
 	return nil
 }
 
-func (s *workloadSimulatorImpl) simulateInsert(ctx context.Context, tx *sql.Tx) (*sqlgen.UniqueKey, error) {
-	var err error
-	sql, uk, err := s.sqlGen.GenInsertRow()
-	if err != nil {
-		return nil, errors.Annotate(err, "generate INSERT SQL error")
+func (s *workloadSimulatorImpl) GetInvolvedTables() []string {
+	involvedTbls := []string{}
+	for tblName := range s.tblConfigs {
+		involvedTbls = append(involvedTbls, tblName)
 	}
-	uk.OPLock.Lock()
-	defer uk.OPLock.Unlock()
-	_, err = tx.ExecContext(ctx, sql)
-	if err != nil {
-		return nil, errors.Annotate(err, "execute INSERT SQL error")
-	}
-	err = s.mcp.AddUK(uk)
-	if err != nil {
-		return nil, errors.Annotate(err, "add new UK to MCP error")
-	}
-	return uk, nil
-}
-
-func (s *workloadSimulatorImpl) simulateDelete(ctx context.Context, tx *sql.Tx) error {
-	var err error
-	uk := s.mcp.NextUK()
-	if uk == nil {
-		return errors.Trace(ErrNoMCPData)
-	}
-	uk.OPLock.Lock()
-	defer uk.OPLock.Unlock()
-	sql, err := s.sqlGen.GenDeleteRow(uk)
-	if err != nil {
-		return errors.Annotate(err, "generate DELETE SQL error")
-	}
-	_, err = tx.ExecContext(ctx, sql)
-	if err != nil {
-		return errors.Annotate(err, "execute DELETE SQL error")
-	}
-	err = s.mcp.DeleteUK(uk)
-	if err != nil {
-		return errors.Annotate(err, "delete UK from MCP error")
-	}
-	return nil
-}
-
-func (s *workloadSimulatorImpl) simulateUpdate(ctx context.Context, tx *sql.Tx) error {
-	var err error
-	uk := s.mcp.NextUK()
-	if uk == nil {
-		return errors.Trace(ErrNoMCPData)
-	}
-	uk.OPLock.Lock()
-	defer uk.OPLock.Unlock()
-	sql, err := s.sqlGen.GenUpdateRow(uk)
-	if err != nil {
-		return errors.Annotate(err, "generate UPDATE SQL error")
-	}
-	_, err = tx.ExecContext(ctx, sql)
-	if err != nil {
-		return errors.Annotate(err, "execute UPDATE SQL error")
-	}
-	return nil
+	return involvedTbls
 }

@@ -12,38 +12,6 @@ import (
 	"github.com/pingcap/tiflow/dm/simulator/internal/parser"
 )
 
-type testWorkloadErrorListener struct {
-	baseErrorListener antlr.ErrorListener
-	t                 *testing.T
-}
-
-func NewTestWorkloadErrorListener(el antlr.ErrorListener, t *testing.T) *testWorkloadErrorListener {
-	return &testWorkloadErrorListener{
-		baseErrorListener: el,
-		t:                 t,
-	}
-}
-
-func (el *testWorkloadErrorListener) SyntaxError(recognizer antlr.Recognizer, offendingSymbol interface{}, line, column int, msg string, e antlr.RecognitionException) {
-	el.baseErrorListener.SyntaxError(recognizer, offendingSymbol, line, column, msg, e)
-	assert.Fail(el.t, "parsing code error", "syntax error")
-}
-
-func (el *testWorkloadErrorListener) ReportAmbiguity(recognizer antlr.Parser, dfa *antlr.DFA, startIndex, stopIndex int, exact bool, ambigAlts *antlr.BitSet, configs antlr.ATNConfigSet) {
-	el.baseErrorListener.ReportAmbiguity(recognizer, dfa, startIndex, stopIndex, exact, ambigAlts, configs)
-	assert.Fail(el.t, "parsing code error", "report ambiguity")
-}
-
-func (el *testWorkloadErrorListener) ReportAttemptingFullContext(recognizer antlr.Parser, dfa *antlr.DFA, startIndex, stopIndex int, conflictingAlts *antlr.BitSet, configs antlr.ATNConfigSet) {
-	el.baseErrorListener.ReportAttemptingFullContext(recognizer, dfa, startIndex, stopIndex, conflictingAlts, configs)
-	assert.Fail(el.t, "parsing code error", "report attemping full context")
-}
-
-func (el *testWorkloadErrorListener) ReportContextSensitivity(recognizer antlr.Parser, dfa *antlr.DFA, startIndex, stopIndex, prediction int, configs antlr.ATNConfigSet) {
-	el.baseErrorListener.ReportContextSensitivity(recognizer, dfa, startIndex, stopIndex, prediction, configs)
-	assert.Fail(el.t, "parsing code error", "report context sensitivity")
-}
-
 type testParseStepSuite struct {
 	suite.Suite
 	tableConfigs map[string]*config.TableConfig
@@ -115,19 +83,40 @@ REPEAT 3 (
 	lexer := parser.NewWorkloadLexer(input)
 	stream := antlr.NewCommonTokenStream(lexer, 0)
 	p := parser.NewWorkloadParser(stream)
-	p.AddErrorListener(
-		NewTestWorkloadErrorListener(
-			antlr.NewDiagnosticErrorListener(true),
-			s.T(),
-		),
+	el := NewParseStepsErrorListener(
+		antlr.NewDiagnosticErrorListener(true),
 	)
+	p.AddErrorListener(el)
 	p.BuildParseTrees = true
 	tree := p.WorkloadSteps()
 	sl := NewParseStepsListener(s.tableConfigs)
 	antlr.ParseTreeWalkerDefault.Walk(sl, tree)
+	assert.Nil(s.T(), el.Err())
 	for _, step := range sl.totalSteps {
 		s.T().Logf("%v\n", step)
 	}
+}
+
+func (s *testParseStepSuite) TestSyntaxError() {
+	testCode := `
+REPEAT 2 (
+  testRow = INSERT games.members;
+)
+);`
+	input := antlr.NewInputStream(testCode)
+	lexer := parser.NewWorkloadLexer(input)
+	stream := antlr.NewCommonTokenStream(lexer, 0)
+	p := parser.NewWorkloadParser(stream)
+	el := NewParseStepsErrorListener(
+		antlr.NewDiagnosticErrorListener(true),
+	)
+	p.AddErrorListener(el)
+	p.BuildParseTrees = true
+	tree := p.WorkloadSteps()
+	sl := NewParseStepsListener(s.tableConfigs)
+	antlr.ParseTreeWalkerDefault.Walk(sl, tree)
+	assert.NotNil(s.T(), el.Err(), "should have syntax error")
+	s.T().Logf("Got syntax error: %v\n", el.Err())
 }
 
 func TestParseStepSuite(t *testing.T) {

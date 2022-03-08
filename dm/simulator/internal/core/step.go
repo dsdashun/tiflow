@@ -14,6 +14,7 @@ import (
 
 type DMLWorkloadStep interface {
 	Execute(*DMLWorkloadStepContext) error
+	GetTableName() string
 }
 
 type DMLWorkloadStepContext struct {
@@ -26,10 +27,18 @@ type DMLWorkloadStepContext struct {
 type insertStep struct {
 	assignedRowID string
 	sqlGen        sqlgen.SQLGenerator
+	tableName     string
 }
 
 func (stp *insertStep) String() string {
-	return fmt.Sprintf("DML Step: { Type: INSERT, AssignedRowID: %s }", stp.assignedRowID)
+	return fmt.Sprintf(
+		"%p: DML Step: { Type: INSERT, Table: %s, AssignedRowID: %s }",
+		stp, stp.GetTableName(), stp.assignedRowID,
+	)
+}
+
+func (stp *insertStep) GetTableName() string {
+	return stp.tableName
 }
 
 func (stp *insertStep) Execute(sctx *DMLWorkloadStepContext) error {
@@ -49,15 +58,7 @@ func (stp *insertStep) Execute(sctx *DMLWorkloadStepContext) error {
 		return errors.Annotate(err, "add new UK to MCP error")
 	}
 	if len(stp.assignedRowID) > 0 {
-		if curUK, ok := sctx.rowRefs[stp.assignedRowID]; ok {
-			curUK.Lock()
-			curUK.RefCount--
-			curUK.Unlock()
-		}
-		uk.Lock()
 		sctx.rowRefs[stp.assignedRowID] = uk
-		uk.RefCount++
-		uk.Unlock()
 
 	}
 	return nil
@@ -67,10 +68,18 @@ type updateStep struct {
 	sqlGen          sqlgen.SQLGenerator
 	assignmentRowID string
 	inputRowID      string
+	tableName       string
 }
 
 func (stp *updateStep) String() string {
-	return fmt.Sprintf("DML Step: { Type: UPDATE, AssignedRowID: %s, InputRowID: %s }", stp.assignmentRowID, stp.inputRowID)
+	return fmt.Sprintf(
+		"%p: DML Step: { Type: UPDATE, Table: %s, AssignedRowID: %s, InputRowID: %s }",
+		stp, stp.GetTableName(), stp.assignmentRowID, stp.inputRowID,
+	)
+}
+
+func (stp *updateStep) GetTableName() string {
+	return stp.tableName
 }
 
 func (stp *updateStep) Execute(sctx *DMLWorkloadStepContext) error {
@@ -104,15 +113,7 @@ func (stp *updateStep) Execute(sctx *DMLWorkloadStepContext) error {
 	}
 	if len(stp.assignmentRowID) > 0 {
 		if stp.assignmentRowID != stp.inputRowID {
-			if curUK, ok := sctx.rowRefs[stp.assignmentRowID]; ok {
-				curUK.Lock()
-				curUK.RefCount--
-				curUK.Unlock()
-			}
-			uk.Lock()
 			sctx.rowRefs[stp.assignmentRowID] = uk
-			uk.RefCount++
-			uk.Unlock()
 		}
 	}
 	return nil
@@ -121,10 +122,18 @@ func (stp *updateStep) Execute(sctx *DMLWorkloadStepContext) error {
 type deleteStep struct {
 	sqlGen     sqlgen.SQLGenerator
 	inputRowID string
+	tableName  string
 }
 
 func (stp *deleteStep) String() string {
-	return fmt.Sprintf("DML Step: { Type: DELETE, InputRowID: %s }", stp.inputRowID)
+	return fmt.Sprintf(
+		"%p: DML Step: { Type: DELETE, Table: %s, InputRowID: %s }",
+		stp, stp.GetTableName(), stp.inputRowID,
+	)
+}
+
+func (stp *deleteStep) GetTableName() string {
+	return stp.tableName
 }
 
 func (stp *deleteStep) Execute(sctx *DMLWorkloadStepContext) error {
@@ -149,16 +158,8 @@ func (stp *deleteStep) Execute(sctx *DMLWorkloadStepContext) error {
 	uk.OPLock.Lock()
 	defer uk.OPLock.Unlock()
 
-	uk.Lock()
 	if len(stp.inputRowID) > 0 {
 		delete(sctx.rowRefs, stp.inputRowID)
-		uk.RefCount--
-	}
-	refCount := uk.RefCount
-	uk.Unlock()
-	if refCount > 0 {
-		plog.L().Warn("the UK is referred by another workload, skip deleting")
-		return nil
 	}
 	sql, err := stp.sqlGen.GenDeleteRow(uk)
 	if err != nil {
@@ -176,11 +177,19 @@ func (stp *deleteStep) Execute(sctx *DMLWorkloadStepContext) error {
 }
 
 type randomDMLStep struct {
-	sqlGen sqlgen.SQLGenerator
+	sqlGen    sqlgen.SQLGenerator
+	tableName string
 }
 
 func (stp *randomDMLStep) String() string {
-	return "DML Step: { Type: RANDOM }"
+	return fmt.Sprintf(
+		"%p: DML Step: { Type: RANDOM , Table: %s }",
+		stp, stp.GetTableName(),
+	)
+}
+
+func (stp *randomDMLStep) GetTableName() string {
+	return stp.tableName
 }
 
 func (stp *randomDMLStep) Execute(sctx *DMLWorkloadStepContext) error {

@@ -1,15 +1,54 @@
 package core
 
 import (
+	"fmt"
 	"strconv"
 
 	"go.uber.org/zap"
+
+	"github.com/antlr/antlr4/runtime/Go/antlr"
+	"github.com/pingcap/errors"
 
 	plog "github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 	"github.com/pingcap/tiflow/dm/simulator/internal/parser"
 	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
 )
+
+type parseStepsErrorListener struct {
+	baseErrorListener antlr.ErrorListener
+	parseErr          error
+}
+
+func NewParseStepsErrorListener(el antlr.ErrorListener) *parseStepsErrorListener {
+	return &parseStepsErrorListener{
+		baseErrorListener: el,
+	}
+}
+
+func (el *parseStepsErrorListener) Err() error {
+	return el.parseErr
+}
+
+func (el *parseStepsErrorListener) SyntaxError(recognizer antlr.Recognizer, offendingSymbol interface{}, line, column int, msg string, e antlr.RecognitionException) {
+	el.baseErrorListener.SyntaxError(recognizer, offendingSymbol, line, column, msg, e)
+	el.parseErr = errors.Trace(
+		fmt.Errorf("line %d:%d : %s", line, column, msg),
+	)
+
+}
+
+func (el *parseStepsErrorListener) ReportAmbiguity(recognizer antlr.Parser, dfa *antlr.DFA, startIndex, stopIndex int, exact bool, ambigAlts *antlr.BitSet, configs antlr.ATNConfigSet) {
+	el.baseErrorListener.ReportAmbiguity(recognizer, dfa, startIndex, stopIndex, exact, ambigAlts, configs)
+}
+
+func (el *parseStepsErrorListener) ReportAttemptingFullContext(recognizer antlr.Parser, dfa *antlr.DFA, startIndex, stopIndex int, conflictingAlts *antlr.BitSet, configs antlr.ATNConfigSet) {
+	el.baseErrorListener.ReportAttemptingFullContext(recognizer, dfa, startIndex, stopIndex, conflictingAlts, configs)
+}
+
+func (el *parseStepsErrorListener) ReportContextSensitivity(recognizer antlr.Parser, dfa *antlr.DFA, startIndex, stopIndex, prediction int, configs antlr.ATNConfigSet) {
+	el.baseErrorListener.ReportContextSensitivity(recognizer, dfa, startIndex, stopIndex, prediction, configs)
+}
 
 type repeatedStepsParsingContext struct {
 	repeatTimes          int
@@ -121,22 +160,26 @@ func (l *parseStepsListener) newDMLWorkloadStep() DMLWorkloadStep {
 	case "INSERT":
 		return &insertStep{
 			sqlGen:        sqlGen,
+			tableName:     l.curDMLParsingCtx.TableName,
 			assignedRowID: l.curDMLParsingCtx.AssignedRowID,
 		}
 	case "UPDATE":
 		return &updateStep{
 			sqlGen:          sqlGen,
+			tableName:       l.curDMLParsingCtx.TableName,
 			assignmentRowID: l.curDMLParsingCtx.AssignedRowID,
 			inputRowID:      l.curDMLParsingCtx.InputRowID,
 		}
 	case "DELETE":
 		return &deleteStep{
 			sqlGen:     sqlGen,
+			tableName:  l.curDMLParsingCtx.TableName,
 			inputRowID: l.curDMLParsingCtx.InputRowID,
 		}
 	case "RANDOM":
 		return &randomDMLStep{
-			sqlGen: sqlGen,
+			sqlGen:    sqlGen,
+			tableName: l.curDMLParsingCtx.TableName,
 		}
 	default:
 		return nil

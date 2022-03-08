@@ -22,6 +22,7 @@ func NewCLIConfig() *CLIConfig {
 
 type Config struct {
 	DataSources []*DataSourceConfig `yaml:"data_sources"`
+	Workloads   []*WorkloadConfig   `yaml:"workloads"`
 }
 
 func NewConfigFromFile(configFile string) (*Config, error) {
@@ -47,6 +48,7 @@ type DataSourceConfig struct {
 }
 
 type TableConfig struct {
+	TableID              string              `yaml:"id"`
 	DatabaseName         string              `yaml:"db"`
 	TableName            string              `yaml:"table"`
 	Columns              []*ColumnDefinition `yaml:"columns"`
@@ -60,4 +62,5 @@ type ColumnDefinition struct {
 }
 
 type WorkloadConfig struct {
+	WorkloadCode string `yaml:"dsl_code"`
 }

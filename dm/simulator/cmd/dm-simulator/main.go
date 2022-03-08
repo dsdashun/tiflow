@@ -16,7 +16,6 @@ import (
 	plog "github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 	"github.com/pingcap/tiflow/dm/simulator/internal/core"
-	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
 )
 
 func main() {
@@ -84,12 +83,25 @@ func main() {
 		plog.L().Error(gerr.Error())
 		return
 	}
-	sqlGen := sqlgen.NewSQLGeneratorImpl(dbConfig.Tables[0])
-	tableSimu := core.NewWorkloadSimulatorImpl(db, sqlGen)
-	theSimulator := core.NewDBSimulator()
+	tblConfigMap := make(map[string]*config.TableConfig)
+	for _, tblConfig := range dbConfig.Tables {
+		tblConfigMap[tblConfig.TableID] = tblConfig
+	}
 
+	theSimulator := core.NewDBSimulator(db, tblConfigMap)
+	for i, workloadConf := range theConfig.Workloads {
+		workloadSimu, err := core.NewWorkloadSimulatorImpl(tblConfigMap, workloadConf.WorkloadCode)
+		if err != nil {
+			gerr = errors.Annotate(err, "new workload simulator error")
+			plog.L().Error(gerr.Error())
+			return
+		}
+
+		plog.L().Info("add the workload into simulator")
+		theSimulator.AddWorkload(fmt.Sprintf("workload%d", i), workloadSimu)
+	}
 	plog.L().Info("begin to prepare table data")
-	err = tableSimu.PrepareData(context.Background(), 4096)
+	err = theSimulator.PrepareData(context.Background(), 4096)
 	if err != nil {
 		plog.L().Error("prepare table data failed", zap.Error(err))
 		gerr = err
@@ -97,16 +109,13 @@ func main() {
 	}
 	plog.L().Info("prepare table data [DONE]")
 	plog.L().Info("begin to load UKs into MCP")
-	err = tableSimu.LoadMCP(context.Background())
+	err = theSimulator.LoadMCP(context.Background())
 	if err != nil {
 		plog.L().Error("load UKs of table into MCP failed", zap.Error(err))
 		gerr = err
 		return
 	}
 	plog.L().Info("loading UKs into MCP [DONE]")
-
-	plog.L().Info("add the workload into simulator")
-	theSimulator.AddWorkload("games.members/RANDOM", tableSimu)
 
 	plog.L().Info("start simulation")
 	err = theSimulator.StartSimulation(ctx)

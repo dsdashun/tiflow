@@ -13,7 +13,12 @@
 
 package core
 
-import "context"
+import (
+	"context"
+	"database/sql"
+
+	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
+)
 
 type Simulator interface {
 	StartSimulation(ctx context.Context) error
@@ -21,5 +26,6 @@ type Simulator interface {
 }
 
 type WorkloadSimulator interface {
-	SimulateTrx(ctx context.Context) error
+	SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*sqlgen.ModificationCandidatePool) error
+	GetInvolvedTables() []string
 }

@@ -185,19 +185,18 @@ func (s *testWorkloadStepSuite) TestAssignmentReference() {
 	assert.Equalf(s.T(), true, ok, "%s should be assigned", assignedRowID2)
 	s.T().Logf("%s assigned with the UK: %v\n", assignedRowID2, assignedUK2)
 	assert.Equal(s.T(), assignedUK, assignedUK2, "the two assignment should be the same")
-	assert.GreaterOrEqual(s.T(), assignedUK.RefCount, 2, "the assigned UK should have ref count >=2")
 
 	//delete double-refferred row
 	theDeleteStep := &deleteStep{
 		sqlGen:     sqlGen,
 		inputRowID: assignedRowID2,
 	}
+	mock.ExpectExec("^DELETE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
 	err = theDeleteStep.Execute(sctx)
 	assert.Nil(s.T(), err)
 	assignedUK2, ok = sctx.rowRefs[assignedRowID2]
 	assert.Equalf(s.T(), false, ok, "%s should not be assigned", assignedRowID2)
 	s.T().Logf("after delete %s: %v\n", assignedRowID2, assignedUK)
-	assert.Equal(s.T(), 1, assignedUK.RefCount, "the row ref should decrease to 1")
 
 	// assign another row to the row ID
 	theUpdateStep.assignmentRowID = assignedRowID
@@ -208,10 +207,6 @@ func (s *testWorkloadStepSuite) TestAssignmentReference() {
 	anotherAssignedUK, ok := sctx.rowRefs[assignedRowID]
 	assert.Equalf(s.T(), true, ok, "%s should be assigned", assignedRowID)
 	s.T().Logf("%s assigned with the UK: %v\n", assignedRowID, anotherAssignedUK)
-	assert.Equal(s.T(), 1, anotherAssignedUK.RefCount, "the new assigned UK should have ref count of 1")
-	if assignedUK != anotherAssignedUK {
-		assert.Equal(s.T(), 0, assignedUK.RefCount, "the old assigned UK should have ref count of 0")
-	}
 
 	//delete non-existing row-ref
 	theDeleteStep.inputRowID = "@NOT_EXISTING"
@@ -226,7 +221,6 @@ func (s *testWorkloadStepSuite) TestAssignmentReference() {
 	assert.Nil(s.T(), err)
 	_, ok = sctx.rowRefs[assignedRowID]
 	assert.Equalf(s.T(), false, ok, "%s should be unassigned", assignedRowID)
-	assert.Equal(s.T(), 0, anotherAssignedUK.RefCount, "the prev assigned UK should have ref count of 0")
 
 	//normal deletion
 	theDeleteStep.inputRowID = ""

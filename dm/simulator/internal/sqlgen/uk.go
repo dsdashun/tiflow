@@ -21,10 +21,9 @@ import (
 
 type UniqueKey struct {
 	sync.RWMutex
-	OPLock   sync.Mutex
-	RowID    int
-	RefCount int
-	Value    map[string]interface{}
+	OPLock sync.Mutex
+	RowID  int
+	Value  map[string]interface{}
 }
 
 func (uk *UniqueKey) Clone() *UniqueKey {
@@ -44,7 +43,7 @@ func (uk *UniqueKey) String() string {
 	uk.RLock()
 	defer uk.RUnlock()
 	var b strings.Builder
-	fmt.Fprintf(&b, "%p: { RowID: %d, RefCount: %d, ", uk, uk.RowID, uk.RefCount)
+	fmt.Fprintf(&b, "%p: { RowID: %d, ", uk, uk.RowID)
 	fmt.Fprintf(&b, "Keys: ( ")
 	for k, v := range uk.Value {
 		fmt.Fprintf(&b, "%s = %v; ", k, v)

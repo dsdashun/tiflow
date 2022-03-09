@@ -45,17 +45,23 @@ func (stp *insertStep) Execute(sctx *DMLWorkloadStepContext) error {
 	var err error
 	sql, uk, err := stp.sqlGen.GenInsertRow()
 	if err != nil {
-		return errors.Annotate(err, "generate INSERT SQL error")
+		errMsg := "generate INSERT SQL error"
+		plog.L().Error(errMsg, zap.Error(err), zap.String("table_name", stp.GetTableName()))
+		return errors.Annotate(err, errMsg)
 	}
 	uk.OPLock.Lock()
 	defer uk.OPLock.Unlock()
 	_, err = sctx.tx.ExecContext(sctx.ctx, sql)
 	if err != nil {
-		return errors.Annotate(err, "execute INSERT SQL error")
+		errMsg := "execute INSERT SQL error"
+		plog.L().Error(errMsg, zap.Error(err), zap.String("table_name", stp.GetTableName()), zap.String("sql", sql))
+		return errors.Annotate(err, errMsg)
 	}
 	err = sctx.mcp.AddUK(uk)
 	if err != nil {
-		return errors.Annotate(err, "add new UK to MCP error")
+		errMsg := "add new UK to MCP error"
+		plog.L().Error(errMsg, zap.Error(err), zap.String("table_name", stp.GetTableName()), zap.String("unique_key", uk.String()))
+		return errors.Annotate(err, errMsg)
 	}
 	if len(stp.assignedRowID) > 0 {
 		sctx.rowRefs[stp.assignedRowID] = uk
@@ -105,11 +111,15 @@ func (stp *updateStep) Execute(sctx *DMLWorkloadStepContext) error {
 	defer uk.OPLock.Unlock()
 	sql, err := stp.sqlGen.GenUpdateRow(uk)
 	if err != nil {
-		return errors.Annotate(err, "generate UPDATE SQL error")
+		errMsg := "generate UPDATE SQL error"
+		plog.L().Error(errMsg, zap.Error(err), zap.String("table_name", stp.GetTableName()), zap.String("unique_key", uk.String()))
+		return errors.Annotate(err, errMsg)
 	}
 	_, err = sctx.tx.ExecContext(sctx.ctx, sql)
 	if err != nil {
-		return errors.Annotate(err, "execute UPDATE SQL error")
+		errMsg := "execute UPDATE SQL error"
+		plog.L().Error(errMsg, zap.Error(err), zap.String("table_name", stp.GetTableName()), zap.String("sql", sql))
+		return errors.Annotate(err, errMsg)
 	}
 	if len(stp.assignmentRowID) > 0 {
 		if stp.assignmentRowID != stp.inputRowID {
@@ -161,17 +171,23 @@ func (stp *deleteStep) Execute(sctx *DMLWorkloadStepContext) error {
 	if len(stp.inputRowID) > 0 {
 		delete(sctx.rowRefs, stp.inputRowID)
 	}
+	err = sctx.mcp.DeleteUK(uk)
+	if err != nil {
+		errMsg := "delete UK from MCP error"
+		plog.L().Error(errMsg, zap.Error(err), zap.String("table_name", stp.GetTableName()), zap.String("unique_key", uk.String()))
+		return errors.Annotate(err, errMsg)
+	}
 	sql, err := stp.sqlGen.GenDeleteRow(uk)
 	if err != nil {
-		return errors.Annotate(err, "generate DELETE SQL error")
+		errMsg := "generate DELETE SQL error"
+		plog.L().Error(errMsg, zap.Error(err), zap.String("table_name", stp.GetTableName()), zap.String("unique_key", uk.String()))
+		return errors.Annotate(err, errMsg)
 	}
 	_, err = sctx.tx.ExecContext(sctx.ctx, sql)
 	if err != nil {
-		return errors.Annotate(err, "execute DELETE SQL error")
-	}
-	err = sctx.mcp.DeleteUK(uk)
-	if err != nil {
-		return errors.Annotate(err, "delete UK from MCP error")
+		errMsg := "execute DELETE SQL error"
+		plog.L().Error(errMsg, zap.Error(err), zap.String("table_name", stp.GetTableName()), zap.String("sql", sql))
+		return errors.Annotate(err, errMsg)
 	}
 	return nil
 }

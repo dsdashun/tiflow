@@ -66,8 +66,6 @@ func (s *testSQLGenImplSuite) TestDMLBasic() {
 		uk  *UniqueKey
 	)
 	g := NewSQLGeneratorImpl(s.tableConfig)
-	mcp := NewModificationCandidatePool()
-	mcp.PreparePool()
 
 	sql, _, err = g.GenLoadUniqueKeySQL()
 	assert.Nil(s.T(), err)
@@ -77,16 +75,24 @@ func (s *testSQLGenImplSuite) TestDMLBasic() {
 	assert.Nil(s.T(), err)
 	s.T().Logf("Generated Truncate Table SQL: %s\n", sql)
 
-	var ukIter UniqueKeyIterator = mcp
+	mcp := NewModificationCandidatePool()
+	for i := 0; i < 4096; i++ {
+		mcp.keyPool = append(mcp.keyPool, &UniqueKey{
+			RowID: i,
+			Value: map[string]interface{}{
+				"id": i,
+			},
+		})
+	}
 	for i := 0; i < 10; i++ {
-		uk = ukIter.NextUK()
+		uk = mcp.NextUK()
 		sql, err = g.GenUpdateRow(uk)
 		assert.Nil(s.T(), err)
 		s.T().Logf("Generated SQL: %s\n", sql)
 		sql, uk, err = g.GenInsertRow()
 		assert.Nil(s.T(), err)
 		s.T().Logf("Generated SQL: %s\n; Unique key: %v\n", sql, uk)
-		uk = ukIter.NextUK()
+		uk = mcp.NextUK()
 		sql, err = g.GenDeleteRow(uk)
 		assert.Nil(s.T(), err)
 		s.T().Logf("Generated SQL: %s\n; Unique key: %v\n", sql, uk)

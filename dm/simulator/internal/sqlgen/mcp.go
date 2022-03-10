@@ -35,11 +35,13 @@ func init() {
 	})
 }
 
+// ModificationCandidatePool is the core container storing all the current unique keys for a table.
 type ModificationCandidatePool struct {
 	sync.RWMutex
 	keyPool []*UniqueKey
 }
 
+// NewModificationCandidatePool create a new MCP.
 func NewModificationCandidatePool() *ModificationCandidatePool {
 	theKeyPool := make([]*UniqueKey, 0, 8192)
 	return &ModificationCandidatePool{
@@ -47,18 +49,7 @@ func NewModificationCandidatePool() *ModificationCandidatePool {
 	}
 }
 
-func (mcp *ModificationCandidatePool) PreparePool() {
-	for i := 0; i < 4096; i++ {
-		currentLen := len(mcp.keyPool)
-		mcp.keyPool = append(mcp.keyPool, &UniqueKey{
-			RowID: currentLen,
-			Value: map[string]interface{}{
-				"id": i,
-			},
-		})
-	}
-}
-
+// NextUK randomly picks a unique key in the MCP.
 func (mcp *ModificationCandidatePool) NextUK() *UniqueKey {
 	mcp.RLock()
 	defer mcp.RUnlock()
@@ -71,23 +62,15 @@ func (mcp *ModificationCandidatePool) NextUK() *UniqueKey {
 	return mcp.keyPool[idx] // pass by reference
 }
 
-func (mcp *ModificationCandidatePool) GetUKByRowID(rowID int) *UniqueKey {
-	mcp.RLock()
-	defer mcp.RUnlock()
-	if rowID >= 0 && rowID < len(mcp.keyPool) {
-		return mcp.keyPool[rowID]
-	} else {
-		return nil
-	}
-}
-
+// Len gets the current length of the MCP.
 func (mcp *ModificationCandidatePool) Len() int {
 	mcp.RLock()
 	defer mcp.RUnlock()
 	return len(mcp.keyPool)
 }
 
-// it has side effect: the UK's row ID will be changed
+// AddUK adds the unique key into the MCP.
+// It has side effect: the input UK's row ID will be changed.
 func (mcp *ModificationCandidatePool) AddUK(uk *UniqueKey) error {
 	mcp.Lock()
 	defer mcp.Unlock()
@@ -102,10 +85,15 @@ func (mcp *ModificationCandidatePool) AddUK(uk *UniqueKey) error {
 	return nil
 }
 
+// DeleteUK deletes the unique key from the MCP.
+// It will get the row ID of the UK and delete the UK on that position.
+// If the actual value is different from the input UK, the element will still be deleted.
+// It has side effect: after the deletion, the input UK's row ID will be set to -1,
+// to prevent deleting a dangling UK multiple times.
 func (mcp *ModificationCandidatePool) DeleteUK(uk *UniqueKey) error {
 	var (
 		deletedUK *UniqueKey
-		deleteIdx int = -1
+		deleteIdx int
 	)
 	if uk == nil {
 		return nil
@@ -137,6 +125,7 @@ func (mcp *ModificationCandidatePool) DeleteUK(uk *UniqueKey) error {
 	return nil
 }
 
+// Reset cleans up all the items in the MCP.
 func (mcp *ModificationCandidatePool) Reset() {
 	mcp.keyPool = mcp.keyPool[:0]
 }

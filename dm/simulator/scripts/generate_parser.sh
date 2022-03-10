@@ -2,11 +2,16 @@
 
 mydir=$(dirname "${BASH_SOURCE[0]}")
 
-grammar_dir="${mydir}/../grammar"
 target_dir="${mydir}/../internal/parser"
+grammar_dir_rel_to_target="../../grammar"
 
-pushd "${grammar_dir}"
-java -Xmx500M -cp "$HOME/local/lib/antlr-4.9-complete.jar:$CLASSPATH" org.antlr.v4.Tool Workload.g4
-popd
+pkg_name=$(basename "${target_dir}")
 
-mv "${grammar_dir}/"*.go "${target_dir}/"
+cd "${target_dir}" #go to target dir, to ensure the comments of the generated Go file be reasonable
+
+java -Xmx500M -cp "$HOME/local/lib/antlr-4.9-complete.jar:$CLASSPATH" org.antlr.v4.Tool -package "${pkg_name}" "${grammar_dir_rel_to_target}/Workload.g4"
+
+for file_name in "${grammar_dir_rel_to_target}"/*.go; do
+	base_file_name=$(basename "${file_name}")
+	mv "${file_name}" "${base_file_name/.go/.antlr4.go}"
+done

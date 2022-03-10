@@ -1,3 +1,16 @@
+// Copyright 2022 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package parser
 
 import (
@@ -26,13 +39,6 @@ func (l *workloadListener) EnterWorkloadStep(c *WorkloadStepContext) {
 type testWorkloadErrorListener struct {
 	baseErrorListener antlr.ErrorListener
 	t                 *testing.T
-}
-
-func NewTestWorkloadErrorListener(el antlr.ErrorListener, t *testing.T) *testWorkloadErrorListener {
-	return &testWorkloadErrorListener{
-		baseErrorListener: el,
-		t:                 t,
-	}
 }
 
 func (el *testWorkloadErrorListener) SyntaxError(recognizer antlr.Recognizer, offendingSymbol interface{}, line, column int, msg string, e antlr.RecognitionException) {
@@ -80,10 +86,10 @@ REPEAT 3 (
 	stream := antlr.NewCommonTokenStream(lexer, 0)
 	p := NewWorkloadParser(stream)
 	p.AddErrorListener(
-		NewTestWorkloadErrorListener(
-			antlr.NewDiagnosticErrorListener(true),
-			s.T(),
-		),
+		&testWorkloadErrorListener{
+			baseErrorListener: antlr.NewDiagnosticErrorListener(true),
+			t:                 s.T(),
+		},
 	)
 	p.BuildParseTrees = true
 	tree := p.WorkloadSteps()

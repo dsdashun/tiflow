@@ -1,3 +1,16 @@
+// Copyright 2022 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package core
 
 import (
@@ -15,7 +28,6 @@ import (
 	"github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
-	"github.com/pingcap/tiflow/dm/simulator/internal/utils"
 )
 
 type dummyWorkload struct {
@@ -24,7 +36,6 @@ type dummyWorkload struct {
 }
 
 func (w *dummyWorkload) SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*sqlgen.ModificationCandidatePool) error {
-	//log.L().Info("simulated a transaction\n", zap.String("workload_name", w.Name))
 	atomic.AddUint64(&w.TotalExecuted, 1)
 	return nil
 }
@@ -97,7 +108,7 @@ func (s *testDBSimulatorSuite) TestPrepareMCP() {
 		s.T().Fatalf("open testing DB failed: %v\n", err)
 	}
 	recordCount := 128
-	theSimulator := NewDBSimulator(db, tableConfigMap, WithPrepareRecordCount(recordCount))
+	theSimulator := NewDBSimulator(db, tableConfigMap)
 	w1 := &dummyWorkload{
 		Name: "members",
 	}
@@ -132,9 +143,9 @@ func (s *testDBSimulatorSuite) TestChooseWorkload() {
 		weightMap[tableName] = 1
 	}
 	for i := 0; i < 100; i++ {
-		workloadName := utils.RandomChooseKeyByWeights(weightMap)
+		workloadName := randomChooseKeyByWeights(weightMap)
 		theWorkload := simu.workloadSimulators[workloadName]
-		theWorkload.SimulateTrx(ctx, nil, nil)
+		assert.Nil(s.T(), theWorkload.SimulateTrx(ctx, nil, nil))
 	}
 	w1CurrentExecuted := w1.TotalExecuted
 	w2CurrentExecuted := w2.TotalExecuted
@@ -148,9 +159,9 @@ func (s *testDBSimulatorSuite) TestChooseWorkload() {
 		weightMap[tableName] = 1
 	}
 	for i := 0; i < 100; i++ {
-		workloadName := utils.RandomChooseKeyByWeights(weightMap)
+		workloadName := randomChooseKeyByWeights(weightMap)
 		theWorkload := simu.workloadSimulators[workloadName]
-		theWorkload.SimulateTrx(ctx, nil, nil)
+		assert.Nil(s.T(), theWorkload.SimulateTrx(ctx, nil, nil))
 	}
 	assert.Greater(s.T(), w1.TotalExecuted, w1CurrentExecuted, "workload 01 should at least execute once")
 	assert.Greater(s.T(), w2.TotalExecuted, w2CurrentExecuted, "workload 02 should at least execute once")

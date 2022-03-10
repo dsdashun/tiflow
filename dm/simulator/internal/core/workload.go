@@ -28,12 +28,15 @@ import (
 	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
 )
 
+// workloadSimulatorImpl is the implementation of a workload simulator.
 type workloadSimulatorImpl struct {
 	steps            []DMLWorkloadStep
 	totalExecutedTrx uint64
 	tblConfigs       map[string]*config.TableConfig
 }
 
+// NewWorkloadSimulatorImpl creates an implementation for a workload simulator.
+// It parses the workload DSL and checks whether all the involved table configs are provided.
 func NewWorkloadSimulatorImpl(
 	tblConfigs map[string]*config.TableConfig,
 	workloadCode string,
@@ -76,8 +79,9 @@ func NewWorkloadSimulatorImpl(
 	}, nil
 }
 
+// SimulateTrx simulates a transaction for this workload.
+// It implements the WorkloadSimulator interface.
 func (s *workloadSimulatorImpl) SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*sqlgen.ModificationCandidatePool) error {
-	var err error
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return errors.Annotate(err, "begin trx error when simulating a trx")
@@ -92,20 +96,22 @@ func (s *workloadSimulatorImpl) SimulateTrx(ctx context.Context, db *sql.DB, mcp
 		tblName := step.GetTableName()
 		mcp := mcpMap[tblName]
 		sctx.mcp = mcp
-		err = step.Execute(sctx)
-		if err != nil {
-			tx.Rollback()
-			return errors.Annotate(err, "execute the workload step error")
+		if execErr := step.Execute(sctx); execErr != nil {
+			if rbkErr := tx.Rollback(); rbkErr != nil {
+				plog.L().Error("rollback transaction error", zap.Error(rbkErr))
+			}
+			return errors.Annotate(execErr, "execute the workload step error")
 		}
 	}
-	err = tx.Commit()
-	if err != nil {
+	if err := tx.Commit(); err != nil {
 		return errors.Annotate(err, "trx COMMIT error when simulating a trx")
 	}
 	atomic.AddUint64(&s.totalExecutedTrx, 1)
 	return nil
 }
 
+// GetInvolvedTables gathers all the involved tables for this workload.
+// It implements the WorkloadSimulator interface.
 func (s *workloadSimulatorImpl) GetInvolvedTables() []string {
 	involvedTbls := []string{}
 	for tblName := range s.tblConfigs {

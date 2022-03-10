@@ -1,3 +1,16 @@
+// Copyright 2022 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package core
 
 import (
@@ -12,11 +25,16 @@ import (
 	"go.uber.org/zap"
 )
 
+// DMLWorkloadStep contains all the operations for a DML workload step.
 type DMLWorkloadStep interface {
+	// Execute executes the step in a workload.
 	Execute(*DMLWorkloadStepContext) error
+
+	// GetTableName returns the related table of this step.
 	GetTableName() string
 }
 
+// DMLWorkloadStepContext is the context when a workload step is executed.
 type DMLWorkloadStepContext struct {
 	tx      *sql.Tx
 	ctx     context.Context
@@ -24,24 +42,29 @@ type DMLWorkloadStepContext struct {
 	rowRefs map[string]*sqlgen.UniqueKey
 }
 
-type insertStep struct {
+// InsertStep implements the workload step for INSERT.
+type InsertStep struct {
 	assignedRowID string
 	sqlGen        sqlgen.SQLGenerator
 	tableName     string
 }
 
-func (stp *insertStep) String() string {
+// String returns the string representation of an InsertStep.
+func (stp *InsertStep) String() string {
 	return fmt.Sprintf(
 		"%p: DML Step: { Type: INSERT, Table: %s, AssignedRowID: %s }",
 		stp, stp.GetTableName(), stp.assignedRowID,
 	)
 }
 
-func (stp *insertStep) GetTableName() string {
+// GetTableName implements the DMLWorkloadStep interface for InsertStep.
+func (stp *InsertStep) GetTableName() string {
 	return stp.tableName
 }
 
-func (stp *insertStep) Execute(sctx *DMLWorkloadStepContext) error {
+// Execute implements the DMLWorkloadStep interface for InsertStep.
+// It is the core execution logic.
+func (stp *InsertStep) Execute(sctx *DMLWorkloadStepContext) error {
 	var err error
 	sql, uk, err := stp.sqlGen.GenInsertRow()
 	if err != nil {
@@ -65,30 +88,34 @@ func (stp *insertStep) Execute(sctx *DMLWorkloadStepContext) error {
 	}
 	if len(stp.assignedRowID) > 0 {
 		sctx.rowRefs[stp.assignedRowID] = uk
-
 	}
 	return nil
 }
 
-type updateStep struct {
+// UpdateStep implements the workload step for UPDATE.
+type UpdateStep struct {
 	sqlGen          sqlgen.SQLGenerator
 	assignmentRowID string
 	inputRowID      string
 	tableName       string
 }
 
-func (stp *updateStep) String() string {
+// String returns the string representation of an UpdateStep.
+func (stp *UpdateStep) String() string {
 	return fmt.Sprintf(
 		"%p: DML Step: { Type: UPDATE, Table: %s, AssignedRowID: %s, InputRowID: %s }",
 		stp, stp.GetTableName(), stp.assignmentRowID, stp.inputRowID,
 	)
 }
 
-func (stp *updateStep) GetTableName() string {
+// GetTableName implements the DMLWorkloadStep interface for UpdateStep.
+func (stp *UpdateStep) GetTableName() string {
 	return stp.tableName
 }
 
-func (stp *updateStep) Execute(sctx *DMLWorkloadStepContext) error {
+// Execute implements the DMLWorkloadStep interface for UpdateStep.
+// It is the core execution logic.
+func (stp *UpdateStep) Execute(sctx *DMLWorkloadStepContext) error {
 	var (
 		err error
 		uk  *sqlgen.UniqueKey
@@ -129,24 +156,29 @@ func (stp *updateStep) Execute(sctx *DMLWorkloadStepContext) error {
 	return nil
 }
 
-type deleteStep struct {
+// DeleteStep implements the workload step for DELETE.
+type DeleteStep struct {
 	sqlGen     sqlgen.SQLGenerator
 	inputRowID string
 	tableName  string
 }
 
-func (stp *deleteStep) String() string {
+// String returns the string representation of a DeleteStep.
+func (stp *DeleteStep) String() string {
 	return fmt.Sprintf(
 		"%p: DML Step: { Type: DELETE, Table: %s, InputRowID: %s }",
 		stp, stp.GetTableName(), stp.inputRowID,
 	)
 }
 
-func (stp *deleteStep) GetTableName() string {
+// GetTableName implements the DMLWorkloadStep interface for DeleteStep.
+func (stp *DeleteStep) GetTableName() string {
 	return stp.tableName
 }
 
-func (stp *deleteStep) Execute(sctx *DMLWorkloadStepContext) error {
+// Execute implements the DMLWorkloadStep interface for DeleteStep.
+// It is the core execution logic.
+func (stp *DeleteStep) Execute(sctx *DMLWorkloadStepContext) error {
 	var (
 		err error
 		uk  *sqlgen.UniqueKey
@@ -192,36 +224,41 @@ func (stp *deleteStep) Execute(sctx *DMLWorkloadStepContext) error {
 	return nil
 }
 
-type randomDMLStep struct {
+// RandomDMLStep implements the workload step for RANDOM-DML.
+type RandomDMLStep struct {
 	sqlGen    sqlgen.SQLGenerator
 	tableName string
 }
 
-func (stp *randomDMLStep) String() string {
+// String returns the string representation of a RandomDMLStep.
+func (stp *RandomDMLStep) String() string {
 	return fmt.Sprintf(
 		"%p: DML Step: { Type: RANDOM , Table: %s }",
 		stp, stp.GetTableName(),
 	)
 }
 
-func (stp *randomDMLStep) GetTableName() string {
+// GetTableName implements the DMLWorkloadStep interface for RandomDMLStep.
+func (stp *RandomDMLStep) GetTableName() string {
 	return stp.tableName
 }
 
-func (stp *randomDMLStep) Execute(sctx *DMLWorkloadStepContext) error {
+// Execute implements the DMLWorkloadStep interface for RandomDMLStep.
+// It is the core execution logic.
+func (stp *RandomDMLStep) Execute(sctx *DMLWorkloadStepContext) error {
 	var err error
 	dmlType := randType()
 	switch dmlType {
-	case sqlgen.INSERT_DMLType:
-		theInsertStep := &insertStep{
+	case sqlgen.DMLTypeINSERT:
+		theInsertStep := &InsertStep{
 			sqlGen: stp.sqlGen,
 		}
 		err = theInsertStep.Execute(sctx)
 		if err != nil {
 			return errors.Annotate(err, "simulate INSERT error")
 		}
-	case sqlgen.DELETE_DMLType:
-		theDeleteStep := &deleteStep{
+	case sqlgen.DMLTypeDELETE:
+		theDeleteStep := &DeleteStep{
 			sqlGen: stp.sqlGen,
 		}
 		err = theDeleteStep.Execute(sctx)
@@ -229,7 +266,7 @@ func (stp *randomDMLStep) Execute(sctx *DMLWorkloadStepContext) error {
 			return errors.Annotate(err, "simulate DELETE error")
 		}
 	default:
-		theUpdateStep := &updateStep{
+		theUpdateStep := &UpdateStep{
 			sqlGen: stp.sqlGen,
 		}
 		err = theUpdateStep.Execute(sctx)
@@ -244,10 +281,10 @@ func randType() sqlgen.DMLType {
 	randNum := rand.Intn(4)
 	switch randNum {
 	case 0:
-		return sqlgen.INSERT_DMLType
+		return sqlgen.DMLTypeINSERT
 	case 1:
-		return sqlgen.DELETE_DMLType
+		return sqlgen.DMLTypeDELETE
 	default:
-		return sqlgen.UPDATE_DMLType
+		return sqlgen.DMLTypeUPDATE
 	}
 }

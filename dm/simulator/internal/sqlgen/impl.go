@@ -1,3 +1,16 @@
+// Copyright 2022 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package sqlgen
 
 import (
@@ -9,7 +22,7 @@ import (
 	"github.com/pingcap/tidb/parser/format"
 	"github.com/pingcap/tidb/parser/model"
 	"github.com/pingcap/tidb/parser/opcode"
-	_ "github.com/pingcap/tidb/types/parser_driver"
+	_ "github.com/pingcap/tidb/types/parser_driver" // import this to make the parser work
 	"go.uber.org/zap"
 
 	"github.com/pingcap/tiflow/dm/pkg/log"
@@ -22,6 +35,7 @@ type sqlGeneratorImpl struct {
 	ukMap       map[string]struct{}
 }
 
+// NewSQLGeneratorImpl generates a new implemenation object for SQL generator.
 func NewSQLGeneratorImpl(tableConfig *config.TableConfig) *sqlGeneratorImpl {
 	colDefMap := make(map[string]*config.ColumnDefinition)
 	for _, colDef := range tableConfig.Columns {
@@ -40,7 +54,7 @@ func NewSQLGeneratorImpl(tableConfig *config.TableConfig) *sqlGeneratorImpl {
 	}
 }
 
-// outputString parser ast node to SQL string
+// outputString parses an ast node to SQL string.
 func outputString(node ast.Node) (string, error) {
 	var sb strings.Builder
 	err := node.Restore(format.NewRestoreCtx(format.DefaultRestoreFlags, &sb))
@@ -50,6 +64,8 @@ func outputString(node ast.Node) (string, error) {
 	return sb.String(), nil
 }
 
+// GenTruncateTable generates a TRUNCATE TABLE SQL.
+// It implements the SQLGenerator interface.
 func (g *sqlGeneratorImpl) GenTruncateTable() (string, error) {
 	truncateTree := &ast.TruncateTableStmt{
 		Table: &ast.TableName{
@@ -62,7 +78,7 @@ func (g *sqlGeneratorImpl) GenTruncateTable() (string, error) {
 
 func (g *sqlGeneratorImpl) generateWhereClause(theUK map[string]interface{}) (ast.ExprNode, error) {
 	compareExprs := make([]*ast.BinaryOperationExpr, 0)
-	//iterate the existing UKs, to make sure all the uk columns has values
+	// iterate the existing UKs, to make sure all the uk columns has values
 	for ukColName := range g.ukMap {
 		val, ok := theUK[ukColName]
 		if !ok {
@@ -97,6 +113,8 @@ func generateCompoundBinaryOpExpr(compExprs []*ast.BinaryOperationExpr) ast.Expr
 	}
 }
 
+// GenUpdateRow generates an UPDATE SQL for the given unique key.
+// It implements the SQLGenerator interface.
 func (g *sqlGeneratorImpl) GenUpdateRow(theUK *UniqueKey) (string, error) {
 	if theUK == nil {
 		return "", errors.Trace(ErrMissingUKValue)
@@ -104,7 +122,7 @@ func (g *sqlGeneratorImpl) GenUpdateRow(theUK *UniqueKey) (string, error) {
 	assignments := make([]*ast.Assignment, 0)
 	for _, colInfo := range g.columnMap {
 		if _, ok := g.ukMap[colInfo.ColumnName]; ok {
-			//this is a UK column, skip from modifying it
+			// this is a UK column, skip from modifying it
 			continue
 		}
 		assignments = append(assignments, &ast.Assignment{
@@ -133,6 +151,10 @@ func (g *sqlGeneratorImpl) GenUpdateRow(theUK *UniqueKey) (string, error) {
 	return outputString(updateTree)
 }
 
+// GenInsertRow generates an INSERT SQL.
+// It implements the SQLGenerator interface.
+// The new row's unique key is also provided,
+// so that it can be further added into an MCP.
 func (g *sqlGeneratorImpl) GenInsertRow() (string, *UniqueKey, error) {
 	ukValues := make(map[string]interface{})
 	columnNames := []*ast.ColumnName{}
@@ -144,7 +166,7 @@ func (g *sqlGeneratorImpl) GenInsertRow() (string, *UniqueKey, error) {
 		newValue := util.GenerateDataItem(col.DataType)
 		values = append(values, ast.NewValueExpr(newValue, "", ""))
 		if _, ok := g.ukMap[col.ColumnName]; ok {
-			//add UK value
+			// add UK value
 			ukValues[col.ColumnName] = newValue
 		}
 	}
@@ -163,16 +185,17 @@ func (g *sqlGeneratorImpl) GenInsertRow() (string, *UniqueKey, error) {
 	sql, err := outputString(insertTree)
 	if err != nil {
 		return "", nil, errors.Annotate(err, "output INSERT AST into SQL string error")
-	} else {
-		return sql,
-			&UniqueKey{
-				RowID: -1,
-				Value: ukValues,
-			},
-			nil
 	}
+	return sql,
+		&UniqueKey{
+			RowID: -1,
+			Value: ukValues,
+		},
+		nil
 }
 
+// GenDeleteRow generates a DELETE SQL for the given unique key.
+// It implements the SQLGenerator interface.
 func (g *sqlGeneratorImpl) GenDeleteRow(theUK *UniqueKey) (string, error) {
 	if theUK == nil {
 		return "", errors.Trace(ErrMissingUKValue)
@@ -195,6 +218,10 @@ func (g *sqlGeneratorImpl) GenDeleteRow(theUK *UniqueKey) (string, error) {
 	return outputString(updateTree)
 }
 
+// GenLoadUniqueKeySQL generates a SELECT SQL fetching all the uniques of a table.
+// It implements the SQLGenerator interface.
+// The column definitions of the returned data is also provided,
+// so that the values can be stored to different variables.
 func (g *sqlGeneratorImpl) GenLoadUniqueKeySQL() (string, []*config.ColumnDefinition, error) {
 	selectFields := make([]*ast.SelectField, 0)
 	cols := make([]*config.ColumnDefinition, 0)

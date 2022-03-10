@@ -71,12 +71,14 @@ func (s *testWorkloadSimulatorSuite) SetupTest() {
 	mcp := sqlgen.NewModificationCandidatePool()
 	recordCount := 128
 	for i := 0; i < recordCount; i++ {
-		mcp.AddUK(&sqlgen.UniqueKey{
-			RowID: -1,
-			Value: map[string]interface{}{
-				"id": rand.Int(),
-			},
-		})
+		assert.Nil(s.T(),
+			mcp.AddUK(&sqlgen.UniqueKey{
+				RowID: -1,
+				Value: map[string]interface{}{
+					"id": rand.Int(),
+				},
+			}),
+		)
 	}
 	s.mcpMap["members"] = mcp
 }

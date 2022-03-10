@@ -18,10 +18,15 @@ import (
 )
 
 var (
-	ErrMCPCapacityFull       = errors.New("the capacity of the modification candidate pool is full")
-	ErrInvalidRowID          = errors.New("invalid row ID")
-	ErrDeleteUKNotFound      = errors.New("delete UK not found")
-	ErrUKColumnsMismatch     = errors.New("UK columns mismatch")
+	// ErrMCPCapacityFull means the capacity of the modification candidate pool (MCP) is full.
+	ErrMCPCapacityFull = errors.New("the capacity of the modification candidate pool is full")
+	// ErrInvalidRowID means the row ID of the unique key is invalid.
+	// For example, when the row ID is greater than the current MCP size, this error will be triggered.
+	ErrInvalidRowID = errors.New("invalid row ID")
+	// ErrDeleteUKNotFound means the unique key to be deleted is not found in the MCP.
+	ErrDeleteUKNotFound = errors.New("delete UK not found")
+	// ErrUKColValueNotProvided means that some column values of the unique key are not provided.
 	ErrUKColValueNotProvided = errors.New("some UK column values are not provided")
-	ErrMissingUKValue        = errors.New("missing the UK values")
+	// ErrMissingUKValue means the input unique key is nil.
+	ErrMissingUKValue = errors.New("missing the UK values")
 )

@@ -1,3 +1,16 @@
+// Copyright 2022 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package core
 
 import (
@@ -52,12 +65,14 @@ func (s *testWorkloadStepSuite) SetupSuite() {
 	}
 	s.mcp = sqlgen.NewModificationCandidatePool()
 	for i := 0; i < 100; i++ {
-		s.mcp.AddUK(&sqlgen.UniqueKey{
-			RowID: -1,
-			Value: map[string]interface{}{
-				"id": rand.Int(),
-			},
-		})
+		assert.Nil(s.T(),
+			s.mcp.AddUK(&sqlgen.UniqueKey{
+				RowID: -1,
+				Value: map[string]interface{}{
+					"id": rand.Int(),
+				},
+			}),
+		)
 	}
 }
 
@@ -70,16 +85,16 @@ func (s *testWorkloadStepSuite) TestBasic() {
 		s.T().Fatalf("open testing DB failed: %v\n", err)
 	}
 	sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableConfig)
-	theInsertStep := &insertStep{
+	theInsertStep := &InsertStep{
 		sqlGen: sqlGen,
 	}
-	theUpdateStep := &updateStep{
+	theUpdateStep := &UpdateStep{
 		sqlGen: sqlGen,
 	}
-	theDeleteStep := &deleteStep{
+	theDeleteStep := &DeleteStep{
 		sqlGen: sqlGen,
 	}
-	theRandomStep := &randomDMLStep{
+	theRandomStep := &RandomDMLStep{
 		sqlGen: sqlGen,
 	}
 
@@ -124,7 +139,7 @@ func (s *testWorkloadStepSuite) TestAssignmentReference() {
 	}
 	sqlGen := sqlgen.NewSQLGeneratorImpl(s.tableConfig)
 
-	theInsertStep := &insertStep{
+	theInsertStep := &InsertStep{
 		sqlGen: sqlGen,
 	}
 
@@ -154,27 +169,27 @@ func (s *testWorkloadStepSuite) TestAssignmentReference() {
 	s.T().Logf("%s assigned with the UK: %v\n", assignedRowID, assignedUK)
 	assert.NotEqual(s.T(), -1, assignedUK.RowID, "the new UK should have a valid row ID")
 
-	//normal update
-	theUpdateStep := &updateStep{
+	// normal update
+	theUpdateStep := &UpdateStep{
 		sqlGen: sqlGen,
 	}
 	mock.ExpectExec("^UPDATE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
 	err = theUpdateStep.Execute(sctx)
 	assert.Nil(s.T(), err)
 
-	//update use the assigned UK
+	// update use the assigned UK
 	theUpdateStep.inputRowID = assignedRowID
 	mock.ExpectExec("^UPDATE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
 	err = theUpdateStep.Execute(sctx)
 	assert.Nil(s.T(), err)
 
-	//update use an non-existing UK
+	// update use an non-existing UK
 	theUpdateStep.inputRowID = "@NOT_EXISTING"
 	err = theUpdateStep.Execute(sctx)
 	assert.NotNil(s.T(), err, "update a non-existing row should have error")
 	s.T().Logf("updating a non-existing rowID get the following error: %v\n", err)
 
-	//double reference the same UK
+	// double reference the same UK
 	assignedRowID2 := "@abc02"
 	theUpdateStep.inputRowID = assignedRowID
 	theUpdateStep.assignmentRowID = assignedRowID2
@@ -186,15 +201,15 @@ func (s *testWorkloadStepSuite) TestAssignmentReference() {
 	s.T().Logf("%s assigned with the UK: %v\n", assignedRowID2, assignedUK2)
 	assert.Equal(s.T(), assignedUK, assignedUK2, "the two assignment should be the same")
 
-	//delete double-refferred row
-	theDeleteStep := &deleteStep{
+	// delete double-refferred row
+	theDeleteStep := &DeleteStep{
 		sqlGen:     sqlGen,
 		inputRowID: assignedRowID2,
 	}
 	mock.ExpectExec("^DELETE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
 	err = theDeleteStep.Execute(sctx)
 	assert.Nil(s.T(), err)
-	assignedUK2, ok = sctx.rowRefs[assignedRowID2]
+	_, ok = sctx.rowRefs[assignedRowID2]
 	assert.Equalf(s.T(), false, ok, "%s should not be assigned", assignedRowID2)
 	s.T().Logf("after delete %s: %v\n", assignedRowID2, assignedUK)
 
@@ -208,13 +223,13 @@ func (s *testWorkloadStepSuite) TestAssignmentReference() {
 	assert.Equalf(s.T(), true, ok, "%s should be assigned", assignedRowID)
 	s.T().Logf("%s assigned with the UK: %v\n", assignedRowID, anotherAssignedUK)
 
-	//delete non-existing row-ref
+	// delete non-existing row-ref
 	theDeleteStep.inputRowID = "@NOT_EXISTING"
 	err = theDeleteStep.Execute(sctx)
 	assert.NotNil(s.T(), err, "delete a non-existing row should have error")
 	s.T().Logf("deleting a non-existing rowID get the following error: %v\n", err)
 
-	//delete existing row-ref
+	// delete existing row-ref
 	theDeleteStep.inputRowID = assignedRowID
 	mock.ExpectExec("^DELETE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
 	err = theDeleteStep.Execute(sctx)
@@ -222,7 +237,7 @@ func (s *testWorkloadStepSuite) TestAssignmentReference() {
 	_, ok = sctx.rowRefs[assignedRowID]
 	assert.Equalf(s.T(), false, ok, "%s should be unassigned", assignedRowID)
 
-	//normal deletion
+	// normal deletion
 	theDeleteStep.inputRowID = ""
 	mock.ExpectExec("^DELETE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
 	err = theDeleteStep.Execute(sctx)

@@ -1,3 +1,16 @@
+// Copyright 2022 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
@@ -19,14 +32,12 @@ import (
 )
 
 func main() {
-	var (
-		err  error
-		gerr error
-	)
-	plog.InitLogger(&plog.Config{})
+	var gerr error
+	if err := plog.InitLogger(&plog.Config{}); err != nil {
+		log.Fatalf("init logger error: %v\n", err)
+	}
 	defer func() {
-		err = plog.L().Sync()
-		if err != nil {
+		if err := plog.L().Sync(); err != nil {
 			log.Println("sync log failed", err)
 		}
 		if gerr != nil {
@@ -37,17 +48,21 @@ func main() {
 	flag.Parse()
 	if cliConfig.IsHelp {
 		flag.Usage()
-		os.Exit(0)
+		return
 	}
 	if len(cliConfig.ConfigFile) == 0 {
-		fmt.Fprintln(os.Stderr, "config file is empty")
+		errMsg := "config file is empty"
+		fmt.Fprintln(os.Stderr, errMsg)
 		flag.Usage()
-		os.Exit(1)
+		gerr = errors.New(errMsg)
+		return
 	}
 
 	theConfig, err := config.NewConfigFromFile(cliConfig.ConfigFile)
 	if err != nil {
-		log.Fatalf("new config from file error: %v\n", err)
+		gerr = errors.Annotate(err, "new config from file error")
+		fmt.Fprintln(os.Stderr, gerr)
+		return
 	}
 	// this context is for the main function context, sending signals will cancel the context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -101,16 +116,14 @@ func main() {
 		theSimulator.AddWorkload(fmt.Sprintf("workload%d", i), workloadSimu)
 	}
 	plog.L().Info("begin to prepare table data")
-	err = theSimulator.PrepareData(context.Background(), 4096)
-	if err != nil {
+	if err := theSimulator.PrepareData(context.Background(), 4096); err != nil {
 		plog.L().Error("prepare table data failed", zap.Error(err))
 		gerr = err
 		return
 	}
 	plog.L().Info("prepare table data [DONE]")
 	plog.L().Info("begin to load UKs into MCP")
-	err = theSimulator.LoadMCP(context.Background())
-	if err != nil {
+	if err := theSimulator.LoadMCP(context.Background()); err != nil {
 		plog.L().Error("load UKs of table into MCP failed", zap.Error(err))
 		gerr = err
 		return
@@ -118,16 +131,14 @@ func main() {
 	plog.L().Info("loading UKs into MCP [DONE]")
 
 	plog.L().Info("start simulation")
-	err = theSimulator.StartSimulation(ctx)
-	if err != nil {
+	if err := theSimulator.StartSimulation(ctx); err != nil {
 		plog.L().Error("start simulation failed", zap.Error(err))
 		gerr = err
 		return
 	}
 	<-ctx.Done()
 	plog.L().Info("simulation terminated")
-	err = theSimulator.StopSimulation()
-	if err != nil {
+	if err := theSimulator.StopSimulation(); err != nil {
 		plog.L().Error("stop simulation failed", zap.Error(err))
 		gerr = err
 		return

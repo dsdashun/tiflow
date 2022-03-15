@@ -14,7 +14,10 @@
 // Package sqlgen is the logic for generating different kinds of SQL statements.
 package sqlgen
 
-import "github.com/pingcap/tiflow/dm/simulator/internal/config"
+import (
+	"github.com/pingcap/tiflow/dm/simulator/internal/config"
+	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
+)
 
 // DMLType is the type describing different kinds of DML operations.
 type DMLType int
@@ -41,9 +44,9 @@ type SQLGenerator interface {
 	// GenInsertRow generates an INSERT SQL.
 	// The new row's unique key is also provided,
 	// so that it can be further added into an MCP.
-	GenInsertRow() (string, *UniqueKey, error)
+	GenInsertRow() (string, *mcp.UniqueKey, error)
 	// GenUpdateRow generates an UPDATE SQL for the given unique key.
-	GenUpdateRow(*UniqueKey) (string, error)
+	GenUpdateRow(*mcp.UniqueKey) (string, error)
 	// GenDeleteRow generates a DELETE SQL for the given unique key.
-	GenDeleteRow(*UniqueKey) (string, error)
+	GenDeleteRow(*mcp.UniqueKey) (string, error)
 }

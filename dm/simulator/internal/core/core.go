@@ -19,7 +19,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
+	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
 )
 
 // Simulator defines all the basic operations of a simulator.
@@ -34,7 +34,7 @@ type Simulator interface {
 // WorkloadSimulator defines all the basic operations for simulating a transaction of a workload.
 type WorkloadSimulator interface {
 	// SimulateTrx simulates a transaction from the workload simulator.
-	SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*sqlgen.ModificationCandidatePool) error
+	SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*mcp.ModificationCandidatePool) error
 
 	// GetInvolvedTables collects all the involved table names in the workload.
 	// This operation is often used when the caller wants to collect all the involved tables for several workloads,

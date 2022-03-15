@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/errors"
 	plog "github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
+	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
 	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
 )
 
@@ -42,7 +43,7 @@ type DBSimulator struct {
 	workerCh           chan WorkloadSimulator
 	db                 *sql.DB
 	tblConfigs         map[string]*config.TableConfig
-	mcpMap             map[string]*sqlgen.ModificationCandidatePool
+	mcpMap             map[string]*mcp.ModificationCandidatePool
 }
 
 // NewDBSimulator creates a new DB simulator.
@@ -51,7 +52,7 @@ func NewDBSimulator(db *sql.DB, tblConfigs map[string]*config.TableConfig) *DBSi
 		db:                 db,
 		tblConfigs:         tblConfigs,
 		workloadSimulators: make(map[string]WorkloadSimulator),
-		mcpMap:             make(map[string]*sqlgen.ModificationCandidatePool),
+		mcpMap:             make(map[string]*mcp.ModificationCandidatePool),
 	}
 }
 
@@ -174,7 +175,7 @@ func (s *DBSimulator) LoadMCP(ctx context.Context) error {
 			return errors.Annotate(err, "execute load Unique SQL error")
 		}
 		defer rows.Close()
-		mcp := sqlgen.NewModificationCandidatePool()
+		theMCP := mcp.NewModificationCandidatePool(8192)
 		for rows.Next() {
 			values := make([]interface{}, 0)
 			for _, colMeta := range colMetas {
@@ -197,11 +198,8 @@ func (s *DBSimulator) LoadMCP(ctx context.Context) error {
 				colMeta := colMetas[i]
 				ukValue[colMeta.ColumnName] = getValueHolderValue(v)
 			}
-			theUK := &sqlgen.UniqueKey{
-				RowID: -1,
-				Value: ukValue,
-			}
-			if addErr := mcp.AddUK(theUK); addErr != nil {
+			theUK := mcp.NewUniqueKey(-1, ukValue)
+			if addErr := theMCP.AddUK(theUK); addErr != nil {
 				plog.L().Error("add UK into MCP error", zap.Error(addErr), zap.String("unique_key", theUK.String()))
 			}
 			plog.L().Debug("add UK value to the pool", zap.Any("uk", theUK))
@@ -209,7 +207,7 @@ func (s *DBSimulator) LoadMCP(ctx context.Context) error {
 		if rows.Err() != nil {
 			return errors.Annotate(err, "fetch rows has error")
 		}
-		s.mcpMap[tblName] = mcp
+		s.mcpMap[tblName] = theMCP
 	}
 	return nil
 }

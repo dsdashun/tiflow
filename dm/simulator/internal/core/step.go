@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/errors"
 	plog "github.com/pingcap/tiflow/dm/pkg/log"
+	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
 	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
 	"go.uber.org/zap"
 )
@@ -38,8 +39,8 @@ type DMLWorkloadStep interface {
 type DMLWorkloadStepContext struct {
 	tx      *sql.Tx
 	ctx     context.Context
-	mcp     *sqlgen.ModificationCandidatePool
-	rowRefs map[string]*sqlgen.UniqueKey
+	mcp     *mcp.ModificationCandidatePool
+	rowRefs map[string]*mcp.UniqueKey
 }
 
 // InsertStep implements the workload step for INSERT.
@@ -72,8 +73,8 @@ func (stp *InsertStep) Execute(sctx *DMLWorkloadStepContext) error {
 		plog.L().Error(errMsg, zap.Error(err), zap.String("table_name", stp.GetTableName()))
 		return errors.Annotate(err, errMsg)
 	}
-	uk.OPLock.Lock()
-	defer uk.OPLock.Unlock()
+	uk.LockRowOperation()
+	defer uk.UnlockRowOperation()
 	_, err = sctx.tx.ExecContext(sctx.ctx, sql)
 	if err != nil {
 		errMsg := "execute INSERT SQL error"
@@ -118,7 +119,7 @@ func (stp *UpdateStep) GetTableName() string {
 func (stp *UpdateStep) Execute(sctx *DMLWorkloadStepContext) error {
 	var (
 		err error
-		uk  *sqlgen.UniqueKey
+		uk  *mcp.UniqueKey
 		ok  bool
 	)
 	if len(stp.inputRowID) > 0 {
@@ -134,8 +135,8 @@ func (stp *UpdateStep) Execute(sctx *DMLWorkloadStepContext) error {
 			return ErrNoMCPData
 		}
 	}
-	uk.OPLock.Lock()
-	defer uk.OPLock.Unlock()
+	uk.LockRowOperation()
+	defer uk.UnlockRowOperation()
 	sql, err := stp.sqlGen.GenUpdateRow(uk)
 	if err != nil {
 		errMsg := "generate UPDATE SQL error"
@@ -181,7 +182,7 @@ func (stp *DeleteStep) GetTableName() string {
 func (stp *DeleteStep) Execute(sctx *DMLWorkloadStepContext) error {
 	var (
 		err error
-		uk  *sqlgen.UniqueKey
+		uk  *mcp.UniqueKey
 		ok  bool
 	)
 	if len(stp.inputRowID) > 0 {
@@ -197,8 +198,8 @@ func (stp *DeleteStep) Execute(sctx *DMLWorkloadStepContext) error {
 			return ErrNoMCPData
 		}
 	}
-	uk.OPLock.Lock()
-	defer uk.OPLock.Unlock()
+	uk.LockRowOperation()
+	defer uk.UnlockRowOperation()
 
 	if len(stp.inputRowID) > 0 {
 		delete(sctx.rowRefs, stp.inputRowID)

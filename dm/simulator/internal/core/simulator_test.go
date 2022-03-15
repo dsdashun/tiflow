@@ -27,7 +27,7 @@ import (
 
 	"github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
-	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
+	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
 )
 
 type dummyWorkload struct {
@@ -35,7 +35,7 @@ type dummyWorkload struct {
 	TotalExecuted uint64
 }
 
-func (w *dummyWorkload) SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*sqlgen.ModificationCandidatePool) error {
+func (w *dummyWorkload) SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*mcp.ModificationCandidatePool) error {
 	atomic.AddUint64(&w.TotalExecuted, 1)
 	return nil
 }

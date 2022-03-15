@@ -24,8 +24,8 @@ import (
 
 	plog "github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
+	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
 	"github.com/pingcap/tiflow/dm/simulator/internal/parser"
-	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
 )
 
 // workloadSimulatorImpl is the implementation of a workload simulator.
@@ -81,7 +81,7 @@ func NewWorkloadSimulatorImpl(
 
 // SimulateTrx simulates a transaction for this workload.
 // It implements the WorkloadSimulator interface.
-func (s *workloadSimulatorImpl) SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*sqlgen.ModificationCandidatePool) error {
+func (s *workloadSimulatorImpl) SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*mcp.ModificationCandidatePool) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return errors.Annotate(err, "begin trx error when simulating a trx")
@@ -90,7 +90,7 @@ func (s *workloadSimulatorImpl) SimulateTrx(ctx context.Context, db *sql.DB, mcp
 	sctx := &DMLWorkloadStepContext{
 		tx:      tx,
 		ctx:     ctx,
-		rowRefs: make(map[string]*sqlgen.UniqueKey),
+		rowRefs: make(map[string]*mcp.UniqueKey),
 	}
 	for _, step := range s.steps {
 		tblName := step.GetTableName()

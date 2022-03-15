@@ -25,13 +25,14 @@ import (
 
 	"github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
+	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
 	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
 )
 
 type testWorkloadStepSuite struct {
 	suite.Suite
 	tableConfig *config.TableConfig
-	mcp         *sqlgen.ModificationCandidatePool
+	theMCP      *mcp.ModificationCandidatePool
 }
 
 func (s *testWorkloadStepSuite) SetupSuite() {
@@ -63,15 +64,12 @@ func (s *testWorkloadStepSuite) SetupSuite() {
 		},
 		UniqueKeyColumnNames: []string{"id"},
 	}
-	s.mcp = sqlgen.NewModificationCandidatePool()
+	s.theMCP = mcp.NewModificationCandidatePool(8192)
 	for i := 0; i < 100; i++ {
 		assert.Nil(s.T(),
-			s.mcp.AddUK(&sqlgen.UniqueKey{
-				RowID: -1,
-				Value: map[string]interface{}{
-					"id": rand.Int(),
-				},
-			}),
+			s.theMCP.AddUK(mcp.NewUniqueKey(-1, map[string]interface{}{
+				"id": rand.Int(),
+			})),
 		)
 	}
 }
@@ -105,8 +103,8 @@ func (s *testWorkloadStepSuite) TestBasic() {
 	sctx := &DMLWorkloadStepContext{
 		tx:      tx,
 		ctx:     ctx,
-		mcp:     s.mcp,
-		rowRefs: make(map[string]*sqlgen.UniqueKey),
+		mcp:     s.theMCP,
+		rowRefs: make(map[string]*mcp.UniqueKey),
 	}
 	mock.ExpectExec("^INSERT (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
 	err = theInsertStep.Execute(sctx)
@@ -150,8 +148,8 @@ func (s *testWorkloadStepSuite) TestAssignmentReference() {
 	sctx := &DMLWorkloadStepContext{
 		tx:      tx,
 		ctx:     ctx,
-		mcp:     s.mcp,
-		rowRefs: make(map[string]*sqlgen.UniqueKey),
+		mcp:     s.theMCP,
+		rowRefs: make(map[string]*mcp.UniqueKey),
 	}
 	mock.ExpectExec("^INSERT (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
 	err = theInsertStep.Execute(sctx)
@@ -167,7 +165,7 @@ func (s *testWorkloadStepSuite) TestAssignmentReference() {
 	assignedUK, ok := sctx.rowRefs[assignedRowID]
 	assert.Equalf(s.T(), true, ok, "%s should be assigned", assignedRowID)
 	s.T().Logf("%s assigned with the UK: %v\n", assignedRowID, assignedUK)
-	assert.NotEqual(s.T(), -1, assignedUK.RowID, "the new UK should have a valid row ID")
+	assert.NotEqual(s.T(), -1, assignedUK.GetRowID(), "the new UK should have a valid row ID")
 
 	// normal update
 	theUpdateStep := &UpdateStep{

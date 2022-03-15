@@ -25,13 +25,13 @@ import (
 
 	"github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
-	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
+	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
 )
 
 type testWorkloadSimulatorSuite struct {
 	suite.Suite
 	tableConfig *config.TableConfig
-	mcpMap      map[string]*sqlgen.ModificationCandidatePool
+	mcpMap      map[string]*mcp.ModificationCandidatePool
 }
 
 func (s *testWorkloadSimulatorSuite) SetupSuite() {
@@ -64,23 +64,20 @@ func (s *testWorkloadSimulatorSuite) SetupSuite() {
 		},
 		UniqueKeyColumnNames: []string{"id"},
 	}
-	s.mcpMap = make(map[string]*sqlgen.ModificationCandidatePool)
+	s.mcpMap = make(map[string]*mcp.ModificationCandidatePool)
 }
 
 func (s *testWorkloadSimulatorSuite) SetupTest() {
-	mcp := sqlgen.NewModificationCandidatePool()
+	theMCP := mcp.NewModificationCandidatePool(8192)
 	recordCount := 128
 	for i := 0; i < recordCount; i++ {
 		assert.Nil(s.T(),
-			mcp.AddUK(&sqlgen.UniqueKey{
-				RowID: -1,
-				Value: map[string]interface{}{
-					"id": rand.Int(),
-				},
-			}),
+			theMCP.AddUK(mcp.NewUniqueKey(-1, map[string]interface{}{
+				"id": rand.Int(),
+			})),
 		)
 	}
-	s.mcpMap["members"] = mcp
+	s.mcpMap["members"] = theMCP
 }
 
 func mockSingleDMLTrx(mock sqlmock.Sqlmock) {

@@ -27,6 +27,7 @@ import (
 
 	"github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
+	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
 )
 
 type sqlGeneratorImpl struct {
@@ -35,7 +36,7 @@ type sqlGeneratorImpl struct {
 	ukMap       map[string]struct{}
 }
 
-// NewSQLGeneratorImpl generates a new implemenation object for SQL generator.
+// NewSQLGeneratorImpl generates a new implementation object for SQL generator.
 func NewSQLGeneratorImpl(tableConfig *config.TableConfig) *sqlGeneratorImpl {
 	colDefMap := make(map[string]*config.ColumnDefinition)
 	for _, colDef := range tableConfig.Columns {
@@ -115,7 +116,7 @@ func generateCompoundBinaryOpExpr(compExprs []*ast.BinaryOperationExpr) ast.Expr
 
 // GenUpdateRow generates an UPDATE SQL for the given unique key.
 // It implements the SQLGenerator interface.
-func (g *sqlGeneratorImpl) GenUpdateRow(theUK *UniqueKey) (string, error) {
+func (g *sqlGeneratorImpl) GenUpdateRow(theUK *mcp.UniqueKey) (string, error) {
 	if theUK == nil {
 		return "", errors.Trace(ErrMissingUKValue)
 	}
@@ -132,7 +133,7 @@ func (g *sqlGeneratorImpl) GenUpdateRow(theUK *UniqueKey) (string, error) {
 			Expr: ast.NewValueExpr(util.GenerateDataItem(colInfo.DataType), "", ""),
 		})
 	}
-	whereClause, err := g.generateWhereClause(theUK.Value)
+	whereClause, err := g.generateWhereClause(theUK.GetValue())
 	if err != nil {
 		return "", errors.Annotate(err, "generate where clause error")
 	}
@@ -155,7 +156,7 @@ func (g *sqlGeneratorImpl) GenUpdateRow(theUK *UniqueKey) (string, error) {
 // It implements the SQLGenerator interface.
 // The new row's unique key is also provided,
 // so that it can be further added into an MCP.
-func (g *sqlGeneratorImpl) GenInsertRow() (string, *UniqueKey, error) {
+func (g *sqlGeneratorImpl) GenInsertRow() (string, *mcp.UniqueKey, error) {
 	ukValues := make(map[string]interface{})
 	columnNames := []*ast.ColumnName{}
 	values := []ast.ExprNode{}
@@ -186,21 +187,16 @@ func (g *sqlGeneratorImpl) GenInsertRow() (string, *UniqueKey, error) {
 	if err != nil {
 		return "", nil, errors.Annotate(err, "output INSERT AST into SQL string error")
 	}
-	return sql,
-		&UniqueKey{
-			RowID: -1,
-			Value: ukValues,
-		},
-		nil
+	return sql, mcp.NewUniqueKey(-1, ukValues), nil
 }
 
 // GenDeleteRow generates a DELETE SQL for the given unique key.
 // It implements the SQLGenerator interface.
-func (g *sqlGeneratorImpl) GenDeleteRow(theUK *UniqueKey) (string, error) {
+func (g *sqlGeneratorImpl) GenDeleteRow(theUK *mcp.UniqueKey) (string, error) {
 	if theUK == nil {
 		return "", errors.Trace(ErrMissingUKValue)
 	}
-	whereClause, err := g.generateWhereClause(theUK.Value)
+	whereClause, err := g.generateWhereClause(theUK.GetValue())
 	if err != nil {
 		return "", errors.Annotate(err, "generate where clause error")
 	}

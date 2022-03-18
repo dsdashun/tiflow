@@ -245,7 +245,7 @@ func (s *DBSimulator) StartSimulation(ctx context.Context) error {
 		s.Lock()
 		defer s.Unlock()
 		s.ctx, s.cancel = context.WithCancel(ctx)
-		workerCount := 4 // currently, it is hard-coded.  TODO: make it a input parameter.
+		workerCount := 8 // currently, it is hard-coded.  TODO: make it a input parameter.
 		s.wg.Add(workerCount)
 		s.workerCh = make(chan WorkloadSimulator, workerCount)
 		for i := 0; i < workerCount; i++ {

@@ -37,10 +37,11 @@ type DMLWorkloadStep interface {
 
 // DMLWorkloadStepContext is the context when a workload step is executed.
 type DMLWorkloadStepContext struct {
-	tx      *sql.Tx
-	ctx     context.Context
-	mcp     *mcp.ModificationCandidatePool
-	rowRefs map[string]*mcp.UniqueKey
+	tx       *sql.Tx
+	ctx      context.Context
+	mcp      *mcp.ModificationCandidatePool
+	rowRefs  map[string]*mcp.UniqueKey
+	addedUKs map[string]map[*mcp.UniqueKey]struct{}
 }
 
 // InsertStep implements the workload step for INSERT.
@@ -73,20 +74,16 @@ func (stp *InsertStep) Execute(sctx *DMLWorkloadStepContext) error {
 		plog.L().Error(errMsg, zap.Error(err), zap.String("table_name", stp.GetTableName()))
 		return errors.Annotate(err, errMsg)
 	}
-	uk.LockRowOperation()
-	defer uk.UnlockRowOperation()
 	_, err = sctx.tx.ExecContext(sctx.ctx, sql)
 	if err != nil {
 		errMsg := "execute INSERT SQL error"
 		plog.L().Error(errMsg, zap.Error(err), zap.String("table_name", stp.GetTableName()), zap.String("sql", sql))
 		return errors.Annotate(err, errMsg)
 	}
-	err = sctx.mcp.AddUK(uk)
-	if err != nil {
-		errMsg := "add new UK to MCP error"
-		plog.L().Error(errMsg, zap.Error(err), zap.String("table_name", stp.GetTableName()), zap.String("unique_key", uk.String()))
-		return errors.Annotate(err, errMsg)
+	if _, ok := sctx.addedUKs[stp.tableName]; !ok {
+		sctx.addedUKs[stp.tableName] = make(map[*mcp.UniqueKey]struct{})
 	}
+	sctx.addedUKs[stp.tableName][uk] = struct{}{}
 	if len(stp.assignedRowID) > 0 {
 		sctx.rowRefs[stp.assignedRowID] = uk
 	}
@@ -135,8 +132,7 @@ func (stp *UpdateStep) Execute(sctx *DMLWorkloadStepContext) error {
 			return ErrNoMCPData
 		}
 	}
-	uk.LockRowOperation()
-	defer uk.UnlockRowOperation()
+
 	sql, err := stp.sqlGen.GenUpdateRow(uk)
 	if err != nil {
 		errMsg := "generate UPDATE SQL error"
@@ -198,17 +194,24 @@ func (stp *DeleteStep) Execute(sctx *DMLWorkloadStepContext) error {
 			return ErrNoMCPData
 		}
 	}
-	uk.LockRowOperation()
-	defer uk.UnlockRowOperation()
 
 	if len(stp.inputRowID) > 0 {
 		delete(sctx.rowRefs, stp.inputRowID)
 	}
-	err = sctx.mcp.DeleteUK(uk)
-	if err != nil {
-		errMsg := "delete UK from MCP error"
-		plog.L().Error(errMsg, zap.Error(err), zap.String("table_name", stp.GetTableName()), zap.String("unique_key", uk.String()))
-		return errors.Annotate(err, errMsg)
+	hasDeletedFromTempUKs := false
+	if _, ok := sctx.addedUKs[stp.tableName]; ok {
+		if _, ok := sctx.addedUKs[stp.tableName][uk]; ok {
+			delete(sctx.addedUKs[stp.tableName], uk)
+			hasDeletedFromTempUKs = true
+		}
+	}
+	if !hasDeletedFromTempUKs {
+		err = sctx.mcp.DeleteUK(uk)
+		if err != nil {
+			errMsg := "delete UK from MCP error"
+			plog.L().Error(errMsg, zap.Error(err), zap.String("table_name", stp.GetTableName()), zap.String("unique_key", uk.String()))
+			return errors.Annotate(err, errMsg)
+		}
 	}
 	sql, err := stp.sqlGen.GenDeleteRow(uk)
 	if err != nil {
@@ -252,7 +255,8 @@ func (stp *RandomDMLStep) Execute(sctx *DMLWorkloadStepContext) error {
 	switch dmlType {
 	case sqlgen.DMLTypeINSERT:
 		theInsertStep := &InsertStep{
-			sqlGen: stp.sqlGen,
+			sqlGen:    stp.sqlGen,
+			tableName: stp.tableName,
 		}
 		err = theInsertStep.Execute(sctx)
 		if err != nil {
@@ -260,7 +264,8 @@ func (stp *RandomDMLStep) Execute(sctx *DMLWorkloadStepContext) error {
 		}
 	case sqlgen.DMLTypeDELETE:
 		theDeleteStep := &DeleteStep{
-			sqlGen: stp.sqlGen,
+			sqlGen:    stp.sqlGen,
+			tableName: stp.tableName,
 		}
 		err = theDeleteStep.Execute(sctx)
 		if err != nil {
@@ -268,7 +273,8 @@ func (stp *RandomDMLStep) Execute(sctx *DMLWorkloadStepContext) error {
 		}
 	default:
 		theUpdateStep := &UpdateStep{
-			sqlGen: stp.sqlGen,
+			sqlGen:    stp.sqlGen,
+			tableName: stp.tableName,
 		}
 		err = theUpdateStep.Execute(sctx)
 		if err != nil {

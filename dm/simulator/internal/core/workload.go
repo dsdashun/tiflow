@@ -82,15 +82,16 @@ func NewWorkloadSimulatorImpl(
 // SimulateTrx simulates a transaction for this workload.
 // It implements the WorkloadSimulator interface.
 func (s *workloadSimulatorImpl) SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*mcp.ModificationCandidatePool) error {
-	tx, err := db.BeginTx(ctx, nil)
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return errors.Annotate(err, "begin trx error when simulating a trx")
 	}
 
 	sctx := &DMLWorkloadStepContext{
-		tx:      tx,
-		ctx:     ctx,
-		rowRefs: make(map[string]*mcp.UniqueKey),
+		tx:       tx,
+		ctx:      ctx,
+		rowRefs:  make(map[string]*mcp.UniqueKey),
+		addedUKs: make(map[string]map[*mcp.UniqueKey]struct{}),
 	}
 	for _, step := range s.steps {
 		tblName := step.GetTableName()
@@ -105,6 +106,22 @@ func (s *workloadSimulatorImpl) SimulateTrx(ctx context.Context, db *sql.DB, mcp
 	}
 	if err := tx.Commit(); err != nil {
 		return errors.Annotate(err, "trx COMMIT error when simulating a trx")
+	}
+	for tblName, tableAddedUKMap := range sctx.addedUKs {
+		theMCP, ok := mcpMap[tblName]
+		if !ok {
+			plog.L().Error("cannot find the MCP", zap.String("table_name", tblName))
+			continue
+		}
+		for uk := range tableAddedUKMap {
+			if uk != nil {
+				if err := theMCP.AddUK(uk); err != nil {
+					errMsg := "add new UK to MCP error"
+					plog.L().Error(errMsg, zap.Error(err), zap.String("table_name", tblName), zap.String("unique_key", uk.String()))
+					return errors.Annotate(err, errMsg)
+				}
+			}
+		}
 	}
 	atomic.AddUint64(&s.totalExecutedTrx, 1)
 	return nil

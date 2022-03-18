@@ -117,7 +117,7 @@ func (uk *UniqueKey) String() string {
 
 // IsValueEqual tests whether two UK's value parts are equal.
 func (uk *UniqueKey) IsValueEqual(otherUK *UniqueKey) bool {
-	if otherUK == nil {
+	if uk == nil || otherUK == nil {
 		return false
 	}
 	uk.RLock()

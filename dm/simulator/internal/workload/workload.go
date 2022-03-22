@@ -36,4 +36,13 @@ type WorkloadSimulator interface {
 	// so that the workload simulator should simulate transactions
 	// using the latest table structure.
 	SetTableConfig(tableID string, tblConfig *config.TableConfig)
+	// Enable enables this workload.
+	Enable()
+	// Disable disables this workload.
+	// A disabled workload won't be executed unitil it is enabled again.
+	Disable()
+	// IsEnabled checks whether this workload is enabled or not.
+	IsEnabled() bool
+	// DoesInvolveTable checks whether this workload involves the specified table.
+	DoesInvolveTable(tableID string) bool
 }

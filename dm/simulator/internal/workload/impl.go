@@ -20,6 +20,7 @@ import (
 
 	"github.com/antlr/antlr4/runtime/Go/antlr"
 	"github.com/pingcap/errors"
+	uatomic "go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	plog "github.com/pingcap/tiflow/dm/pkg/log"
@@ -31,6 +32,7 @@ import (
 
 // workloadSimulatorImpl is the implementation of a workload simulator.
 type workloadSimulatorImpl struct {
+	isEnabled        *uatomic.Bool
 	steps            []DMLWorkloadStep
 	totalExecutedTrx uint64
 	tblConfigs       map[string]*config.TableConfig
@@ -75,9 +77,31 @@ func NewWorkloadSimulatorImpl(
 	}
 
 	return &workloadSimulatorImpl{
+		isEnabled:  uatomic.NewBool(true),
 		steps:      sl.totalSteps,
 		tblConfigs: involvedTblConfigs,
 	}, nil
+}
+
+func (s *workloadSimulatorImpl) Enable() {
+	s.isEnabled.Store(true)
+}
+
+func (s *workloadSimulatorImpl) Disable() {
+	s.isEnabled.Store(false)
+}
+
+func (s *workloadSimulatorImpl) IsEnabled() bool {
+	return s.isEnabled.Load()
+}
+
+func (s *workloadSimulatorImpl) DoesInvolveTable(tableID string) bool {
+	for _, step := range s.steps {
+		if step.GetTableName() == tableID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *workloadSimulatorImpl) SetTableConfig(tableID string, tblConfig *config.TableConfig) {
@@ -98,6 +122,10 @@ func (s *workloadSimulatorImpl) SetTableConfig(tableID string, tblConfig *config
 // SimulateTrx simulates a transaction for this workload.
 // It implements the WorkloadSimulator interface.
 func (s *workloadSimulatorImpl) SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*mcp.ModificationCandidatePool) error {
+	if !s.IsEnabled() {
+		errMsg := "this workload is disabled"
+		return errors.New(errMsg)
+	}
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return errors.Annotate(err, "begin trx error when simulating a trx")

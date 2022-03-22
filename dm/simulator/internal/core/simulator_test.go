@@ -24,6 +24,7 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	uatomic "go.uber.org/atomic"
 
 	"github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
@@ -33,6 +34,15 @@ import (
 type dummyWorkload struct {
 	Name          string
 	TotalExecuted uint64
+	isEnabled     *uatomic.Bool
+}
+
+func NewDummyWorkload(name string) *dummyWorkload {
+	return &dummyWorkload{
+		Name:          name,
+		TotalExecuted: 0,
+		isEnabled:     uatomic.NewBool(true),
+	}
 }
 
 func (w *dummyWorkload) SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*mcp.ModificationCandidatePool) error {
@@ -45,6 +55,22 @@ func (w *dummyWorkload) GetInvolvedTables() []string {
 }
 
 func (w *dummyWorkload) SetTableConfig(tableID string, tblConfig *config.TableConfig) {
+}
+
+func (w *dummyWorkload) Enable() {
+	w.isEnabled.Store(true)
+}
+
+func (w *dummyWorkload) Disable() {
+	w.isEnabled.Store(false)
+}
+
+func (w *dummyWorkload) IsEnabled() bool {
+	return w.isEnabled.Load()
+}
+
+func (w *dummyWorkload) DoesInvolveTable(tableID string) bool {
+	return tableID == w.Name
 }
 
 type testDBSimulatorSuite struct {
@@ -108,9 +134,7 @@ func (s *testDBSimulatorSuite) TestPrepareMCP() {
 	}
 	recordCount := 128
 	theSimulator := NewDBSimulator(db, tableConfigMap)
-	w1 := &dummyWorkload{
-		Name: "members",
-	}
+	w1 := NewDummyWorkload("members")
 	theSimulator.AddWorkload("dummy_members", w1)
 	mockPrepareData(mock, recordCount)
 	err = theSimulator.PrepareData(ctx, recordCount)
@@ -125,15 +149,9 @@ func (s *testDBSimulatorSuite) TestChooseWorkload() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	simu := NewDBSimulator(nil, nil)
-	w1 := &dummyWorkload{
-		Name: "workload01",
-	}
-	w2 := &dummyWorkload{
-		Name: "workload02",
-	}
-	w3 := &dummyWorkload{
-		Name: "workload03",
-	}
+	w1 := NewDummyWorkload("workload01")
+	w2 := NewDummyWorkload("workload02")
+	w3 := NewDummyWorkload("workload03")
 	simu.AddWorkload("w1", w1)
 	simu.AddWorkload("w2", w2)
 	simu.AddWorkload("w3", w3)
@@ -152,6 +170,19 @@ func (s *testDBSimulatorSuite) TestChooseWorkload() {
 	assert.Greater(s.T(), w1CurrentExecuted, uint64(0), "workload 01 should at least execute once")
 	assert.Greater(s.T(), w2CurrentExecuted, uint64(0), "workload 02 should at least execute once")
 	assert.Greater(s.T(), w3CurrentExecuted, uint64(0), "workload 03 should at least execute once")
+	w2.Disable()
+	for i := 0; i < 100; i++ {
+		workloadName := randomChooseKeyByWeights(weightMap)
+		theWorkload := simu.workloadSimulators[workloadName]
+		if !theWorkload.IsEnabled() {
+			continue
+		}
+		s.Nil(theWorkload.SimulateTrx(ctx, nil, nil))
+	}
+	s.Equal(w2CurrentExecuted, w2.TotalExecuted, "workload 02 should not be executed after disabled")
+	w1CurrentExecuted = w1.TotalExecuted
+	w3CurrentExecuted = w3.TotalExecuted
+	w2.Enable()
 	simu.RemoveWorkload("w3")
 	weightMap = make(map[string]int)
 	for tableName := range simu.workloadSimulators {
@@ -160,7 +191,10 @@ func (s *testDBSimulatorSuite) TestChooseWorkload() {
 	for i := 0; i < 100; i++ {
 		workloadName := randomChooseKeyByWeights(weightMap)
 		theWorkload := simu.workloadSimulators[workloadName]
-		assert.Nil(s.T(), theWorkload.SimulateTrx(ctx, nil, nil))
+		if !theWorkload.IsEnabled() {
+			continue
+		}
+		s.Nil(theWorkload.SimulateTrx(ctx, nil, nil))
 	}
 	assert.Greater(s.T(), w1.TotalExecuted, w1CurrentExecuted, "workload 01 should at least execute once")
 	assert.Greater(s.T(), w2.TotalExecuted, w2CurrentExecuted, "workload 02 should at least execute once")
@@ -172,12 +206,8 @@ func (s *testDBSimulatorSuite) TestStartStopSimulation() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	simu := NewDBSimulator(nil, nil)
-	w1 := &dummyWorkload{
-		Name: "workload01",
-	}
-	w2 := &dummyWorkload{
-		Name: "workload02",
-	}
+	w1 := NewDummyWorkload("workload01")
+	w2 := NewDummyWorkload("workload02")
 	simu.AddWorkload("w1", w1)
 	simu.AddWorkload("w2", w2)
 	err = simu.StartSimulation(ctx)

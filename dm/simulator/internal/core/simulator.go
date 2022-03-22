@@ -119,7 +119,7 @@ func (s *DBSimulator) getAllInvolvedTableConfigs() (map[string]*config.TableConf
 func (s *DBSimulator) PrepareData(ctx context.Context, recordCount int) error {
 	allInvolvedTblConfigs, err := s.getAllInvolvedTableConfigs()
 	if err != nil {
-		return errors.Annotate(err, "prepare data error")
+		return errors.Annotate(err, "get all involved table configs error")
 	}
 	for _, tblConf := range allInvolvedTblConfigs {
 		var (
@@ -265,6 +265,7 @@ func (s *DBSimulator) StartSimulation(ctx context.Context) error {
 				plog.L().Info("worker exit")
 			}()
 		}
+		s.isRunning.Store(true) // set to running, so that the following goroutines can start the loop
 		s.wg.Add(1)
 		go func(ctx context.Context) {
 			defer s.wg.Done()
@@ -278,7 +279,24 @@ func (s *DBSimulator) StartSimulation(ctx context.Context) error {
 				}
 			}
 		}(s.ctx)
-		s.isRunning.Store(true)
+		s.wg.Add(1)
+		go func(ctx context.Context) {
+			defer s.wg.Done()
+			for s.isRunning.Load() {
+				select {
+				case <-ctx.Done():
+					plog.L().Info("context is done")
+					return
+				default:
+					plog.L().Info("begin to refresh all table schemas")
+					if err := s.RefreshAllTableSchemas(ctx); err != nil {
+						plog.L().Error("refresh all tables schemas error", zap.Error(err))
+					}
+					plog.L().Info("refresh all table schemas finished")
+				}
+				time.Sleep(3 * time.Second)
+			}
+		}(s.ctx)
 		plog.L().Info("the DB simulator has been started")
 		return nil
 	}()
@@ -325,6 +343,9 @@ func (s *DBSimulator) DoSimulation(ctx context.Context) {
 				workloadName := randomChooseKeyByWeights(weightMap)
 				return s.workloadSimulators[workloadName]
 			}()
+		}
+		if !theWorkload.IsEnabled() {
+			continue
 		}
 		select {
 		case s.workerCh <- theWorkload:
@@ -386,18 +407,31 @@ func (s *DBSimulator) RefreshTableSchema(ctx context.Context, tableID string) er
 		plog.L().Error(errMsg, zap.String("table_id", tableID))
 		return errors.New(errMsg)
 	}
+	theLogger := plog.L().With(
+		zap.String("table_id", tableID),
+		zap.String("database_name", currentTblConfig.DatabaseName),
+		zap.String("table_name", currentTblConfig.TableName),
+	)
 	newTableConfig, err := s.NewTableConfigFromDB(ctx, tableID, currentTblConfig.DatabaseName, currentTblConfig.TableName)
 	if err != nil {
 		errMsg := "new table config from DB error"
-		plog.L().Error(errMsg,
+		theLogger.Error(errMsg,
 			zap.Error(err),
-			zap.String("table_id", tableID),
-			zap.String("database_name", currentTblConfig.DatabaseName),
-			zap.String("table_name", currentTblConfig.TableName),
 		)
 		return errors.Annotate(err, errMsg)
 	}
-	// TODO: the modification should has least impact on current simulation
+	// If newTableConfig deep equal to the current one, do nothing.
+	if currentTblConfig.IsDeepEqual(newTableConfig) {
+		return nil
+	}
+	theLogger.Info("the table schema has changed")
+	// disable all the involved workloads of this table first
+	for _, ws := range s.workloadSimulators {
+		if ws.DoesInvolveTable(tableID) {
+			ws.Disable()
+			defer ws.Enable()
+		}
+	}
 	s.tblConfigs[tableID] = newTableConfig
 	for _, ws := range s.workloadSimulators {
 		ws.SetTableConfig(tableID, newTableConfig)
@@ -407,5 +441,20 @@ func (s *DBSimulator) RefreshTableSchema(ctx context.Context, tableID string) er
 		return errors.Annotate(err, "new MCP from table error")
 	}
 	s.mcpMap[tableID] = newMCP
+	return nil
+}
+
+func (s *DBSimulator) RefreshAllTableSchemas(ctx context.Context) error {
+	allInvolvedTblConfigs, err := s.getAllInvolvedTableConfigs()
+	if err != nil {
+		return errors.Annotate(err, "get all involved table configs error")
+	}
+	for tableID := range allInvolvedTblConfigs {
+		if err := s.RefreshTableSchema(ctx, tableID); err != nil {
+			errMsg := "refresh table schema error"
+			plog.L().Error(errMsg, zap.Error(err), zap.String("table_id", tableID))
+			return errors.Annotate(err, errMsg)
+		}
+	}
 	return nil
 }

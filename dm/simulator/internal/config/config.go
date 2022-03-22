@@ -76,6 +76,44 @@ type TableConfig struct {
 	UniqueKeyColumnNames []string            `yaml:"unique_keys"`
 }
 
+func (cfgA *TableConfig) IsDeepEqual(cfgB *TableConfig) bool {
+	if cfgA == nil || cfgB == nil {
+		return false
+	}
+	if cfgA.TableID != cfgB.TableID ||
+		cfgA.DatabaseName != cfgB.DatabaseName ||
+		cfgA.TableName != cfgB.TableName ||
+		len(cfgA.Columns) != len(cfgB.Columns) ||
+		len(cfgA.UniqueKeyColumnNames) != len(cfgB.UniqueKeyColumnNames) {
+		return false
+	}
+	// begin to check the column definitions
+	cfgAColMap := make(map[string]*ColumnDefinition)
+	cfgBColMap := make(map[string]*ColumnDefinition)
+	for _, colDef := range cfgA.Columns {
+		cfgAColMap[colDef.ColumnName] = colDef
+	}
+	for _, colDef := range cfgB.Columns {
+		cfgBColMap[colDef.ColumnName] = colDef
+	}
+	for colName, colDef := range cfgAColMap {
+		cfgBColDef, ok := cfgBColMap[colName]
+		if !ok {
+			return false
+		}
+		if colDef.DataType != cfgBColDef.DataType {
+			return false
+		}
+	}
+	// begin to check the unique key names
+	for i, ukName := range cfgA.UniqueKeyColumnNames {
+		if ukName != cfgB.UniqueKeyColumnNames[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // ColumnDefinition is the sub config for describing a column in a simulating table.
 type ColumnDefinition struct {
 	ColumnName string `yaml:"name"`

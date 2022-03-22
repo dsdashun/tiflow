@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
 	"github.com/pingcap/tiflow/dm/simulator/internal/schema"
 	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
+	"github.com/pingcap/tiflow/dm/simulator/internal/workload"
 )
 
 // DBSimulator is the core simulator execution framework.
@@ -38,10 +39,10 @@ type DBSimulator struct {
 	isRunning          atomic.Bool
 	wg                 sync.WaitGroup
 	workloadLock       sync.RWMutex
-	workloadSimulators map[string]WorkloadSimulator
+	workloadSimulators map[string]workload.WorkloadSimulator
 	ctx                context.Context
 	cancel             func()
-	workerCh           chan WorkloadSimulator
+	workerCh           chan workload.WorkloadSimulator
 	db                 *sql.DB
 	tblConfigs         map[string]*config.TableConfig
 	mcpMap             map[string]*mcp.ModificationCandidatePool
@@ -52,14 +53,14 @@ func NewDBSimulator(db *sql.DB, tblConfigs map[string]*config.TableConfig) *DBSi
 	return &DBSimulator{
 		db:                 db,
 		tblConfigs:         tblConfigs,
-		workloadSimulators: make(map[string]WorkloadSimulator),
+		workloadSimulators: make(map[string]workload.WorkloadSimulator),
 		mcpMap:             make(map[string]*mcp.ModificationCandidatePool),
 	}
 }
 
 // workerFn is the main loop for a simulation worker.
 // It will continuously receive a workload and simulate a transaction for it.
-func (s *DBSimulator) workerFn(ctx context.Context, workloadCh <-chan WorkloadSimulator) {
+func (s *DBSimulator) workerFn(ctx context.Context, workloadCh <-chan workload.WorkloadSimulator) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -77,7 +78,7 @@ func (s *DBSimulator) workerFn(ctx context.Context, workloadCh <-chan WorkloadSi
 }
 
 // AddWorkload adds a workload simulator to the DB simulator.
-func (s *DBSimulator) AddWorkload(workloadName string, ts WorkloadSimulator) {
+func (s *DBSimulator) AddWorkload(workloadName string, ts workload.WorkloadSimulator) {
 	s.workloadLock.Lock()
 	defer s.workloadLock.Unlock()
 	s.workloadSimulators[workloadName] = ts
@@ -256,7 +257,7 @@ func (s *DBSimulator) StartSimulation(ctx context.Context) error {
 		s.ctx, s.cancel = context.WithCancel(ctx)
 		workerCount := 8 // currently, it is hard-coded.  TODO: make it a input parameter.
 		s.wg.Add(workerCount)
-		s.workerCh = make(chan WorkloadSimulator, workerCount)
+		s.workerCh = make(chan workload.WorkloadSimulator, workerCount)
 		for i := 0; i < workerCount; i++ {
 			go func() {
 				defer s.wg.Done()
@@ -307,14 +308,14 @@ func (s *DBSimulator) StopSimulation() error {
 // DoSimulation is the main loop for this DB simulator.
 // It will randomly choose a workload simulator and assign to a execution worker.
 func (s *DBSimulator) DoSimulation(ctx context.Context) {
-	var theWorkload WorkloadSimulator
+	var theWorkload workload.WorkloadSimulator
 	for {
 		select {
 		case <-ctx.Done():
 			plog.L().Info("context expired, simulation terminated")
 			return
 		default:
-			theWorkload = func() WorkloadSimulator {
+			theWorkload = func() workload.WorkloadSimulator {
 				s.workloadLock.RLock()
 				defer s.workloadLock.RUnlock()
 				weightMap := make(map[string]int)

@@ -11,16 +11,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package core
+package workload
 
 import (
 	"github.com/pingcap/errors"
 )
 
 var (
-	// ErrUnsupportedColumnType means the column type is unsupported for retrieving data from the DB.
-	// It is used when loading the existing DB data into the MCP.
-	ErrUnsupportedColumnType error = errors.New("unsupported column type")
+	// ErrNoMCPData means the modification candidate pool (MCP) is empty.
+	ErrNoMCPData error = errors.New("no MCP data")
+
+	// ErrRowIDNotFound means the row ID is not found in the current assignment in the workload.
+	// For example, when trying to get the referred unique key of row ID '@abc' before the assignment taking place,
+	// this error will be triggered.
+	ErrRowIDNotFound error = errors.New("row ID not found")
 
 	// ErrTableConfigNotFound means the table configuration is not found.
 	ErrTableConfigNotFound error = errors.New("table config not found")

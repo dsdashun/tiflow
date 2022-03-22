@@ -29,6 +29,7 @@ import (
 	plog "github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 	"github.com/pingcap/tiflow/dm/simulator/internal/core"
+	"github.com/pingcap/tiflow/dm/simulator/internal/workload"
 )
 
 func main() {
@@ -105,7 +106,7 @@ func main() {
 
 	theSimulator := core.NewDBSimulator(db, tblConfigMap)
 	for i, workloadConf := range theConfig.Workloads {
-		workloadSimu, err := core.NewWorkloadSimulatorImpl(tblConfigMap, workloadConf.WorkloadCode)
+		workloadSimu, err := workload.NewWorkloadSimulatorImpl(tblConfigMap, workloadConf.WorkloadCode)
 		if err != nil {
 			gerr = errors.Annotate(err, "new workload simulator error")
 			plog.L().Error(gerr.Error())

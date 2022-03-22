@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
 	"github.com/pingcap/tiflow/dm/simulator/internal/parser"
+	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
 )
 
 // workloadSimulatorImpl is the implementation of a workload simulator.
@@ -79,6 +80,21 @@ func NewWorkloadSimulatorImpl(
 	}, nil
 }
 
+func (s *workloadSimulatorImpl) SetTableConfig(tableID string, tblConfig *config.TableConfig) {
+	isTableIDUsed := false
+	for _, step := range s.steps {
+		if step.GetTableName() != tableID {
+			continue
+		}
+		isTableIDUsed = true
+		newSQLGen := sqlgen.NewSQLGeneratorImpl(tblConfig)
+		step.SetSQLGen(newSQLGen)
+	}
+	if isTableIDUsed {
+		s.tblConfigs[tableID] = tblConfig
+	}
+}
+
 // SimulateTrx simulates a transaction for this workload.
 // It implements the WorkloadSimulator interface.
 func (s *workloadSimulatorImpl) SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*mcp.ModificationCandidatePool) error {
@@ -95,7 +111,12 @@ func (s *workloadSimulatorImpl) SimulateTrx(ctx context.Context, db *sql.DB, mcp
 	}
 	for _, step := range s.steps {
 		tblName := step.GetTableName()
-		mcp := mcpMap[tblName]
+		mcp, ok := mcpMap[tblName]
+		if !ok {
+			errMsg := "mcp not found"
+			plog.L().Error(errMsg, zap.String("table_name", tblName))
+			return errors.New(errMsg)
+		}
 		sctx.mcp = mcp
 		if execErr := step.Execute(sctx); execErr != nil {
 			if rbkErr := tx.Rollback(); rbkErr != nil {

@@ -80,7 +80,6 @@ type TableConfig struct {
 type ColumnDefinition struct {
 	ColumnName string `yaml:"name"`
 	DataType   string `yaml:"type"`
-	DataLen    int    `yaml:"length"`
 }
 
 // WorkloadConfig is the configuration to describe the attributes of a workload.

@@ -44,22 +44,18 @@ func (s *testWorkloadStepSuite) SetupSuite() {
 			&config.ColumnDefinition{
 				ColumnName: "id",
 				DataType:   "int",
-				DataLen:    11,
 			},
 			&config.ColumnDefinition{
 				ColumnName: "name",
 				DataType:   "varchar",
-				DataLen:    255,
 			},
 			&config.ColumnDefinition{
 				ColumnName: "age",
 				DataType:   "int",
-				DataLen:    11,
 			},
 			&config.ColumnDefinition{
 				ColumnName: "team_id",
 				DataType:   "int",
-				DataLen:    11,
 			},
 		},
 		UniqueKeyColumnNames: []string{"id"},

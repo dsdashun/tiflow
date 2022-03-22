@@ -19,6 +19,7 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
 )
 
@@ -40,4 +41,9 @@ type WorkloadSimulator interface {
 	// This operation is often used when the caller wants to collect all the involved tables for several workloads,
 	// so that only the tables really needed are preparred for data.
 	GetInvolvedTables() []string
+	// SetTableConfig sets the table config of a table ID.
+	// It is called after the table structure has changed,
+	// so that the workload simulator should simulate transactions
+	// using the latest table structure.
+	SetTableConfig(tableID string, tblConfig *config.TableConfig)
 }

@@ -44,6 +44,9 @@ func (w *dummyWorkload) GetInvolvedTables() []string {
 	return []string{w.Name}
 }
 
+func (w *dummyWorkload) SetTableConfig(tableID string, tblConfig *config.TableConfig) {
+}
+
 type testDBSimulatorSuite struct {
 	suite.Suite
 }
@@ -79,22 +82,18 @@ func (s *testDBSimulatorSuite) TestPrepareMCP() {
 				&config.ColumnDefinition{
 					ColumnName: "id",
 					DataType:   "int",
-					DataLen:    11,
 				},
 				&config.ColumnDefinition{
 					ColumnName: "name",
 					DataType:   "varchar",
-					DataLen:    255,
 				},
 				&config.ColumnDefinition{
 					ColumnName: "age",
 					DataType:   "int",
-					DataLen:    11,
 				},
 				&config.ColumnDefinition{
 					ColumnName: "team_id",
 					DataType:   "int",
-					DataLen:    11,
 				},
 			},
 			UniqueKeyColumnNames: []string{"id"},

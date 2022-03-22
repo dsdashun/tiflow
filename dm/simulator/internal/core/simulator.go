@@ -27,6 +27,7 @@ import (
 	plog "github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
+	"github.com/pingcap/tiflow/dm/simulator/internal/schema"
 	"github.com/pingcap/tiflow/dm/simulator/internal/sqlgen"
 )
 
@@ -165,51 +166,59 @@ func (s *DBSimulator) LoadMCP(ctx context.Context) error {
 		return errors.Annotate(err, "load MCP error")
 	}
 	for tblName, tblConf := range allInvolvedTblConfigs {
-		sqlGen := sqlgen.NewSQLGeneratorImpl(tblConf)
-		sql, colMetas, err := sqlGen.GenLoadUniqueKeySQL()
+		theMCP, err := s.NewMCPFromTable(ctx, tblConf)
 		if err != nil {
-			return errors.Annotate(err, "generate load unique key SQL error")
-		}
-		rows, err := s.db.QueryContext(ctx, sql)
-		if err != nil {
-			return errors.Annotate(err, "execute load Unique SQL error")
-		}
-		defer rows.Close()
-		theMCP := mcp.NewModificationCandidatePool(8192)
-		for rows.Next() {
-			values := make([]interface{}, 0)
-			for _, colMeta := range colMetas {
-				valHolder := newColValueHolder(colMeta)
-				if valHolder == nil {
-					plog.L().Error("unsupported data type",
-						zap.String("column_name", colMeta.ColumnName),
-						zap.String("data_type", colMeta.DataType),
-					)
-					return errors.Trace(ErrUnsupportedColumnType)
-				}
-				values = append(values, valHolder)
-			}
-			err = rows.Scan(values...)
-			if err != nil {
-				return errors.Annotate(err, "scan values error")
-			}
-			ukValue := make(map[string]interface{})
-			for i, v := range values {
-				colMeta := colMetas[i]
-				ukValue[colMeta.ColumnName] = getValueHolderValue(v)
-			}
-			theUK := mcp.NewUniqueKey(-1, ukValue)
-			if addErr := theMCP.AddUK(theUK); addErr != nil {
-				plog.L().Error("add UK into MCP error", zap.Error(addErr), zap.String("unique_key", theUK.String()))
-			}
-			plog.L().Debug("add UK value to the pool", zap.Any("uk", theUK))
-		}
-		if rows.Err() != nil {
-			return errors.Annotate(err, "fetch rows has error")
+			return errors.Annotate(err, "new MCP from table error")
 		}
 		s.mcpMap[tblName] = theMCP
 	}
 	return nil
+}
+
+func (s *DBSimulator) NewMCPFromTable(ctx context.Context, tblConf *config.TableConfig) (*mcp.ModificationCandidatePool, error) {
+	sqlGen := sqlgen.NewSQLGeneratorImpl(tblConf)
+	sql, colMetas, err := sqlGen.GenLoadUniqueKeySQL()
+	if err != nil {
+		return nil, errors.Annotate(err, "generate load unique key SQL error")
+	}
+	rows, err := s.db.QueryContext(ctx, sql)
+	if err != nil {
+		return nil, errors.Annotate(err, "execute load Unique SQL error")
+	}
+	defer rows.Close()
+	theMCP := mcp.NewModificationCandidatePool(8192)
+	for rows.Next() {
+		values := make([]interface{}, 0)
+		for _, colMeta := range colMetas {
+			valHolder := newColValueHolder(colMeta)
+			if valHolder == nil {
+				plog.L().Error("unsupported data type",
+					zap.String("column_name", colMeta.ColumnName),
+					zap.String("data_type", colMeta.DataType),
+				)
+				return nil, errors.Trace(ErrUnsupportedColumnType)
+			}
+			values = append(values, valHolder)
+		}
+		err = rows.Scan(values...)
+		if err != nil {
+			return nil, errors.Annotate(err, "scan values error")
+		}
+		ukValue := make(map[string]interface{})
+		for i, v := range values {
+			colMeta := colMetas[i]
+			ukValue[colMeta.ColumnName] = getValueHolderValue(v)
+		}
+		theUK := mcp.NewUniqueKey(-1, ukValue)
+		if addErr := theMCP.AddUK(theUK); addErr != nil {
+			plog.L().Error("add UK into MCP error", zap.Error(addErr), zap.String("unique_key", theUK.String()))
+		}
+		plog.L().Debug("add UK value to the pool", zap.Any("uk", theUK))
+	}
+	if rows.Err() != nil {
+		return nil, errors.Annotate(err, "fetch rows has error")
+	}
+	return theMCP, nil
 }
 
 func newColValueHolder(colMeta *config.ColumnDefinition) interface{} {
@@ -335,4 +344,67 @@ func randomChooseKeyByWeights(weights map[string]int) string {
 	}
 	idx := rand.Intn(len(expandedKeys))
 	return expandedKeys[idx]
+}
+
+func (s *DBSimulator) NewTableConfigFromDB(ctx context.Context, tableID string, databaseName string, tableName string) (*config.TableConfig, error) {
+	theLogger := plog.L().With(
+		zap.String("table_id", tableID),
+		zap.String("db_name", databaseName),
+		zap.String("table_name", tableName),
+	)
+	sg := schema.NewMySQLSchemaGetter(s.db, databaseName, tableName)
+	newColDefs, err := sg.GetColumnDefinitions(ctx)
+	if err != nil {
+		errMsg := "get column definitions error"
+		theLogger.Error(errMsg,
+			zap.Error(err),
+		)
+		return nil, errors.Annotate(err, errMsg)
+	}
+	newUKColumns, err := sg.GetUniqueKeyColumns(ctx)
+	if err != nil {
+		errMsg := "get unique key error"
+		theLogger.Error(errMsg,
+			zap.Error(err),
+		)
+		return nil, errors.Annotate(err, errMsg)
+	}
+	return &config.TableConfig{
+		TableID:              tableID,
+		DatabaseName:         databaseName,
+		TableName:            tableName,
+		Columns:              newColDefs,
+		UniqueKeyColumnNames: newUKColumns,
+	}, nil
+}
+
+func (s *DBSimulator) RefreshTableSchema(ctx context.Context, tableID string) error {
+	currentTblConfig, ok := s.tblConfigs[tableID]
+	if !ok {
+		errMsg := "table ID not found"
+		plog.L().Error(errMsg, zap.String("table_id", tableID))
+		return errors.New(errMsg)
+	}
+	newTableConfig, err := s.NewTableConfigFromDB(ctx, tableID, currentTblConfig.DatabaseName, currentTblConfig.TableName)
+	if err != nil {
+		errMsg := "new table config from DB error"
+		plog.L().Error(errMsg,
+			zap.Error(err),
+			zap.String("table_id", tableID),
+			zap.String("database_name", currentTblConfig.DatabaseName),
+			zap.String("table_name", currentTblConfig.TableName),
+		)
+		return errors.Annotate(err, errMsg)
+	}
+	// TODO: the modification should has least impact on current simulation
+	s.tblConfigs[tableID] = newTableConfig
+	for _, ws := range s.workloadSimulators {
+		ws.SetTableConfig(tableID, newTableConfig)
+	}
+	newMCP, err := s.NewMCPFromTable(ctx, newTableConfig)
+	if err != nil {
+		return errors.Annotate(err, "new MCP from table error")
+	}
+	s.mcpMap[tableID] = newMCP
+	return nil
 }

@@ -15,14 +15,18 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
+	"strings"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
@@ -30,13 +34,11 @@ import (
 
 type testWorkloadSimulatorSuite struct {
 	suite.Suite
-	tableConfig *config.TableConfig
-	mcpMap      map[string]*mcp.ModificationCandidatePool
+	mcpMap map[string]*mcp.ModificationCandidatePool
 }
 
-func (s *testWorkloadSimulatorSuite) SetupSuite() {
-	assert.Nil(s.T(), log.InitLogger(&log.Config{}))
-	s.tableConfig = &config.TableConfig{
+func newTemplateTableConfig() *config.TableConfig {
+	return &config.TableConfig{
 		TableID:      "members",
 		DatabaseName: "games",
 		TableName:    "members",
@@ -44,27 +46,59 @@ func (s *testWorkloadSimulatorSuite) SetupSuite() {
 			&config.ColumnDefinition{
 				ColumnName: "id",
 				DataType:   "int",
-				DataLen:    11,
 			},
 			&config.ColumnDefinition{
 				ColumnName: "name",
 				DataType:   "varchar",
-				DataLen:    255,
 			},
 			&config.ColumnDefinition{
 				ColumnName: "age",
 				DataType:   "int",
-				DataLen:    11,
 			},
 			&config.ColumnDefinition{
 				ColumnName: "team_id",
 				DataType:   "int",
-				DataLen:    11,
 			},
 		},
 		UniqueKeyColumnNames: []string{"id"},
 	}
+}
+func (s *testWorkloadSimulatorSuite) SetupSuite() {
+	assert.Nil(s.T(), log.InitLogger(&log.Config{}))
 	s.mcpMap = make(map[string]*mcp.ModificationCandidatePool)
+}
+
+func newTestMCP(recordCount int, tblConfig *config.TableConfig) (*mcp.ModificationCandidatePool, error) {
+	theMCP := mcp.NewModificationCandidatePool(8192)
+	colDefMap := make(map[string]*config.ColumnDefinition)
+	for _, colDef := range tblConfig.Columns {
+		colDefMap[colDef.ColumnName] = colDef
+	}
+	for i := 0; i < recordCount; i++ {
+		ukValue := make(map[string]interface{})
+		for _, ukColName := range tblConfig.UniqueKeyColumnNames {
+			colDef, ok := colDefMap[ukColName]
+			if !ok {
+				errMsg := "cannot find the column definition"
+				log.L().Error(errMsg, zap.String("col_name", ukColName))
+				return nil, errors.New(errMsg)
+			}
+			switch colDef.DataType {
+			case "int":
+				ukValue[ukColName] = rand.Int()
+			case "varchar":
+				ukValue[ukColName] = fmt.Sprintf("val-%d", rand.Int())
+			default:
+				errMsg := "unsupported data type"
+				log.L().Error(errMsg, zap.String("data_type", colDef.DataType))
+				return nil, errors.New(errMsg)
+			}
+		}
+		if err := theMCP.AddUK(mcp.NewUniqueKey(-1, ukValue)); err != nil {
+			return nil, errors.Annotate(err, "add UK to the MCP error")
+		}
+	}
+	return theMCP, nil
 }
 
 func (s *testWorkloadSimulatorSuite) SetupTest() {
@@ -96,7 +130,7 @@ func (s *testWorkloadSimulatorSuite) TestBasic() {
 	}
 	theSimulator, err := NewWorkloadSimulatorImpl(
 		map[string]*config.TableConfig{
-			"members": s.tableConfig,
+			"members": newTemplateTableConfig(),
 		},
 		"RANDOM-DML members;",
 	)
@@ -105,6 +139,149 @@ func (s *testWorkloadSimulatorSuite) TestBasic() {
 		mockSingleDMLTrx(mock)
 		err = theSimulator.SimulateTrx(ctx, db, s.mcpMap)
 		assert.Nil(s.T(), err)
+	}
+	s.T().Logf("total executed trx: %d\n", theSimulator.totalExecutedTrx)
+}
+
+func mockInsertStep(mock sqlmock.Sqlmock, tblConfig *config.TableConfig) {
+	var colNames []string
+	for _, colDef := range tblConfig.Columns {
+		colNames = append(colNames, fmt.Sprintf("`%s`", colDef.ColumnName))
+	}
+
+	mock.ExpectExec(
+		fmt.Sprintf("^INSERT INTO `%s`\\.`%s` \\(((%s),){%d}(%s)\\) VALUES .+",
+			tblConfig.DatabaseName,
+			tblConfig.TableName,
+			strings.Join(colNames, "|"),
+			len(colNames)-1,
+			strings.Join(colNames, "|"),
+		),
+	).WillReturnResult(sqlmock.NewResult(0, 1))
+}
+
+func mockUpdateStep(mock sqlmock.Sqlmock, tblConfig *config.TableConfig) {
+	var (
+		nonUKColNames    []string
+		quotedUKColNames []string
+	)
+	ukNameMap := make(map[string]struct{})
+	for _, ukColName := range tblConfig.UniqueKeyColumnNames {
+		ukNameMap[ukColName] = struct{}{}
+		quotedUKColNames = append(quotedUKColNames, fmt.Sprintf("`%s`", ukColName))
+	}
+	for _, colDef := range tblConfig.Columns {
+		if _, ok := ukNameMap[colDef.ColumnName]; !ok {
+			nonUKColNames = append(nonUKColNames, fmt.Sprintf("`%s`", colDef.ColumnName))
+		}
+	}
+
+	setExpr := fmt.Sprintf("(%s)=.+", strings.Join(nonUKColNames, "|"))
+	whereExpr := fmt.Sprintf("(%s)=.+", strings.Join(quotedUKColNames, "|"))
+	mock.ExpectExec(
+		fmt.Sprintf("^UPDATE `%s`\\.`%s` SET (%s, ){%d}%s WHERE (%s AND ){%d}%s",
+			tblConfig.DatabaseName,
+			tblConfig.TableName,
+			setExpr,
+			len(nonUKColNames)-1,
+			setExpr,
+			whereExpr,
+			len(tblConfig.UniqueKeyColumnNames)-1,
+			whereExpr,
+		),
+	).WillReturnResult(sqlmock.NewResult(0, 1))
+}
+
+func mockDeleteStep(mock sqlmock.Sqlmock, tblConfig *config.TableConfig) {
+	var (
+		quotedUKColNames []string
+	)
+	for _, ukColName := range tblConfig.UniqueKeyColumnNames {
+		quotedUKColNames = append(quotedUKColNames, fmt.Sprintf("`%s`", ukColName))
+	}
+	whereExpr := fmt.Sprintf("(%s)=.+", strings.Join(quotedUKColNames, "|"))
+	mock.ExpectExec(
+		fmt.Sprintf("^DELETE FROM `%s`\\.`%s` WHERE (%s AND ){%d}%s",
+			tblConfig.DatabaseName,
+			tblConfig.TableName,
+			whereExpr,
+			len(tblConfig.UniqueKeyColumnNames)-1,
+			whereExpr,
+		),
+	).WillReturnResult(sqlmock.NewResult(0, 1))
+}
+
+func (s *testWorkloadSimulatorSuite) TestSchemaChange() {
+	var err error
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	db, mock, err := sqlmock.New()
+	s.Require().Nil(err)
+	tblConfig01 := newTemplateTableConfig()
+	tblConfig01.TableName = "members01"
+	tblConfig01.TableID = "members01"
+	tblConfig02 := newTemplateTableConfig()
+	tblConfig02.TableName = "members02"
+	tblConfig02.TableID = "members02"
+	theSimulator, err := NewWorkloadSimulatorImpl(
+		map[string]*config.TableConfig{
+			"members01": tblConfig01,
+			"members02": tblConfig02,
+		},
+		`INSERT members01;
+		INSERT members02;
+		UPDATE members01;
+		UPDATE members02;
+		DELETE members01;
+		DELETE members02;
+		`,
+	)
+	assert.Nil(s.T(), err)
+	mcp01, err := newTestMCP(128, tblConfig01)
+	s.Require().Nil(err)
+	mcp02, err := newTestMCP(128, tblConfig02)
+	s.Require().Nil(err)
+	theMCPMap := map[string]*mcp.ModificationCandidatePool{
+		tblConfig01.TableID: mcp01,
+		tblConfig02.TableID: mcp02,
+	}
+	for i := 0; i < 50; i++ {
+		mock.ExpectBegin()
+		mockInsertStep(mock, tblConfig01)
+		mockInsertStep(mock, tblConfig02)
+		mockUpdateStep(mock, tblConfig01)
+		mockUpdateStep(mock, tblConfig02)
+		mockDeleteStep(mock, tblConfig01)
+		mockDeleteStep(mock, tblConfig02)
+		mock.ExpectCommit()
+		err = theSimulator.SimulateTrx(ctx, db, theMCPMap)
+		s.Require().Nil(err)
+	}
+	tblConfig02New := &config.TableConfig{
+		TableID:      tblConfig02.TableID,
+		DatabaseName: tblConfig02.DatabaseName,
+		TableName:    tblConfig02.TableName,
+		Columns: append(tblConfig02.Columns, &config.ColumnDefinition{
+			ColumnName: "newcol",
+			DataType:   "varchar",
+		}),
+		UniqueKeyColumnNames: []string{"name", "team_id"},
+	}
+	theSimulator.SetTableConfig("members02", tblConfig02New)
+	mcp02New, err := newTestMCP(128, tblConfig02New)
+	s.Require().Nil(err)
+	theMCPMap[tblConfig02New.TableID] = mcp02New
+	for i := 0; i < 50; i++ {
+		mock.ExpectBegin()
+		mockInsertStep(mock, tblConfig01)
+		mockInsertStep(mock, tblConfig02New)
+		mockUpdateStep(mock, tblConfig01)
+		mockUpdateStep(mock, tblConfig02New)
+		mockDeleteStep(mock, tblConfig01)
+		mockDeleteStep(mock, tblConfig02New)
+		mock.ExpectCommit()
+		err = theSimulator.SimulateTrx(ctx, db, theMCPMap)
+		s.Require().Nil(err)
 	}
 	s.T().Logf("total executed trx: %d\n", theSimulator.totalExecutedTrx)
 }
@@ -123,7 +300,7 @@ func (s *testWorkloadSimulatorSuite) TestParallelSimulation() {
 		}
 		theSimulator, err := NewWorkloadSimulatorImpl(
 			map[string]*config.TableConfig{
-				"members": s.tableConfig,
+				"members": newTemplateTableConfig(),
 			},
 			"RANDOM-DML members;",
 		)

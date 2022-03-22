@@ -30,9 +30,10 @@ import (
 type DMLWorkloadStep interface {
 	// Execute executes the step in a workload.
 	Execute(*DMLWorkloadStepContext) error
-
 	// GetTableName returns the related table of this step.
 	GetTableName() string
+	// SetSQLGen sets the sql generator for this DML workload step
+	SetSQLGen(sqlgen.SQLGenerator)
 }
 
 // DMLWorkloadStepContext is the context when a workload step is executed.
@@ -62,6 +63,12 @@ func (stp *InsertStep) String() string {
 // GetTableName implements the DMLWorkloadStep interface for InsertStep.
 func (stp *InsertStep) GetTableName() string {
 	return stp.tableName
+}
+
+// SetSQLGen sets the SQL generator for this step.
+// It implements the DMLWorkloadStep interface.
+func (stp *InsertStep) SetSQLGen(newSQLGen sqlgen.SQLGenerator) {
+	stp.sqlGen = newSQLGen
 }
 
 // Execute implements the DMLWorkloadStep interface for InsertStep.
@@ -109,6 +116,12 @@ func (stp *UpdateStep) String() string {
 // GetTableName implements the DMLWorkloadStep interface for UpdateStep.
 func (stp *UpdateStep) GetTableName() string {
 	return stp.tableName
+}
+
+// SetSQLGen sets the SQL generator for this step.
+// It implements the DMLWorkloadStep interface.
+func (stp *UpdateStep) SetSQLGen(newSQLGen sqlgen.SQLGenerator) {
+	stp.sqlGen = newSQLGen
 }
 
 // Execute implements the DMLWorkloadStep interface for UpdateStep.
@@ -171,6 +184,12 @@ func (stp *DeleteStep) String() string {
 // GetTableName implements the DMLWorkloadStep interface for DeleteStep.
 func (stp *DeleteStep) GetTableName() string {
 	return stp.tableName
+}
+
+// SetSQLGen sets the SQL generator for this step.
+// It implements the DMLWorkloadStep interface.
+func (stp *DeleteStep) SetSQLGen(newSQLGen sqlgen.SQLGenerator) {
+	stp.sqlGen = newSQLGen
 }
 
 // Execute implements the DMLWorkloadStep interface for DeleteStep.
@@ -245,6 +264,12 @@ func (stp *RandomDMLStep) String() string {
 // GetTableName implements the DMLWorkloadStep interface for RandomDMLStep.
 func (stp *RandomDMLStep) GetTableName() string {
 	return stp.tableName
+}
+
+// SetSQLGen sets the SQL generator for this step.
+// It implements the DMLWorkloadStep interface.
+func (stp *RandomDMLStep) SetSQLGen(newSQLGen sqlgen.SQLGenerator) {
+	stp.sqlGen = newSQLGen
 }
 
 // Execute implements the DMLWorkloadStep interface for RandomDMLStep.

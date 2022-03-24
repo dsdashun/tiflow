@@ -13,36 +13,20 @@ import (
 // MySQLSchemaGetter implementes the logic on  getting the schema of a MySQL table.
 // It implements the `SchemaGetter` interface.
 type MySQLSchemaGetter struct {
-	db        *sql.DB
-	dbName    string
-	tableName string
+	db *sql.DB
 }
 
 // NewMySQLSchemaGetter generats a new MySQLSchemaGetter instance.
-func NewMySQLSchemaGetter(db *sql.DB, dbName string, tableName string) *MySQLSchemaGetter {
+func NewMySQLSchemaGetter(db *sql.DB) *MySQLSchemaGetter {
 	return &MySQLSchemaGetter{
-		db:        db,
-		dbName:    dbName,
-		tableName: tableName,
+		db: db,
 	}
-}
-
-// GetDatabaseName gets the database name of the MySQL table
-// It impelements the `SchemaGetter` interface.
-func (g *MySQLSchemaGetter) GetDatabaseName() string {
-	return g.dbName
-}
-
-// GetTableName gets the table name of the table
-// It impelements the `SchemaGetter` interface.
-func (g *MySQLSchemaGetter) GetTableName() string {
-	return g.tableName
 }
 
 // GetColumnDefinitions gets the column definitions of a MySQL table.
 // It impelements the `SchemaGetter` interface.
-func (g *MySQLSchemaGetter) GetColumnDefinitions(ctx context.Context) ([]*config.ColumnDefinition, error) {
-	rows, err := g.db.QueryContext(ctx, "SELECT COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME=?", g.dbName, g.tableName)
+func (g *MySQLSchemaGetter) GetColumnDefinitions(ctx context.Context, dbName string, tableName string) ([]*config.ColumnDefinition, error) {
+	rows, err := g.db.QueryContext(ctx, "SELECT COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME=?", dbName, tableName)
 	if err != nil {
 		return nil, errors.Annotate(err, "query DB error")
 	}
@@ -74,8 +58,8 @@ type uniqueKeyInfo struct {
 
 // GetUniqueKeyColumns gets the columns of a unique key in a MySQL table.
 // It impelements the `SchemaGetter` interface.
-func (g *MySQLSchemaGetter) GetUniqueKeyColumns(ctx context.Context) ([]string, error) {
-	rows, err := g.db.QueryContext(ctx, fmt.Sprintf("SHOW INDEX FROM %s.%s WHERE Non_unique=0", g.dbName, g.tableName))
+func (g *MySQLSchemaGetter) GetUniqueKeyColumns(ctx context.Context, dbName string, tableName string) ([]string, error) {
+	rows, err := g.db.QueryContext(ctx, fmt.Sprintf("SHOW INDEX FROM %s.%s WHERE Non_unique=0", dbName, tableName))
 	if err != nil {
 		return nil, errors.Annotate(err, "query DB error")
 	}

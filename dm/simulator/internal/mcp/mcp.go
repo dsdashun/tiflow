@@ -55,6 +55,16 @@ func (mcp *ModificationCandidatePool) NextUK() *UniqueKey {
 	return mcp.keyPool[idx] // pass by reference
 }
 
+// GetUK gets a unique key at the specific position in the MCP.
+func (mcp *ModificationCandidatePool) GetUK(rowID int) *UniqueKey {
+	mcp.RLock()
+	defer mcp.RUnlock()
+	if rowID >= len(mcp.keyPool) {
+		return nil
+	}
+	return mcp.keyPool[rowID]
+}
+
 // Len gets the current length of the MCP.
 func (mcp *ModificationCandidatePool) Len() int {
 	mcp.RLock()

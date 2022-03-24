@@ -14,37 +14,11 @@
 package config
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
 )
-
-func newTemplateTableConfig() *TableConfig {
-	return &TableConfig{
-		TableID:      "members",
-		DatabaseName: "games",
-		TableName:    "members",
-		Columns: []*ColumnDefinition{
-			&ColumnDefinition{
-				ColumnName: "id",
-				DataType:   "int",
-			},
-			&ColumnDefinition{
-				ColumnName: "name",
-				DataType:   "varchar",
-			},
-			&ColumnDefinition{
-				ColumnName: "age",
-				DataType:   "int",
-			},
-			&ColumnDefinition{
-				ColumnName: "team_id",
-				DataType:   "int",
-			},
-		},
-		UniqueKeyColumnNames: []string{"name", "team_id"},
-	}
-}
 
 type testConfigSuite struct {
 	suite.Suite
@@ -52,13 +26,23 @@ type testConfigSuite struct {
 
 func (s *testConfigSuite) TestTableConfigDeepEqual() {
 	var nilCfg *TableConfig
-	cfg1 := newTemplateTableConfig()
-	cfg2 := newTemplateTableConfig()
+	cfg1 := NewTemplateTableConfigForTest()
+	cfg1.UniqueKeyColumnNames = []string{"name", "team_id"}
+	cfg2 := NewTemplateTableConfigForTest()
+	cfg2.UniqueKeyColumnNames = []string{"name", "team_id"}
 	s.True(cfg1.IsDeepEqual(cfg2))
 	s.True(cfg2.IsDeepEqual(cfg1))
 
 	s.False(nilCfg.IsDeepEqual(cfg1))
 	s.False(cfg1.IsDeepEqual(nilCfg))
+
+	clonedCfg1 := cfg1.SortedClone()
+	s.True(cfg1.IsDeepEqual(clonedCfg1))
+	s.True(clonedCfg1.IsDeepEqual(cfg1))
+
+	clonedCfg1.Columns[0].DataType = "datetime"
+	s.False(cfg1.IsDeepEqual(clonedCfg1))
+	s.False(clonedCfg1.IsDeepEqual(cfg1))
 
 	curTableID := cfg1.TableID
 	cfg1.TableID = "aaaa"
@@ -86,6 +70,15 @@ func (s *testConfigSuite) TestTableConfigDeepEqual() {
 	s.False(cfg2.IsDeepEqual(cfg1))
 	cfg1.Columns = curColDefs
 
+	curColDef0 := cfg1.Columns[0]
+	cfg1.Columns[0] = &ColumnDefinition{
+		ColumnName: "newcol",
+		DataType:   "int",
+	}
+	s.False(cfg1.IsDeepEqual(cfg2))
+	s.False(cfg2.IsDeepEqual(cfg1))
+	cfg1.Columns[0] = curColDef0
+
 	curUKCols := cfg1.UniqueKeyColumnNames
 	cfg1.UniqueKeyColumnNames = []string{
 		cfg1.UniqueKeyColumnNames[1],
@@ -100,6 +93,16 @@ func (s *testConfigSuite) TestTableConfigDeepEqual() {
 	s.False(cfg1.IsDeepEqual(cfg2))
 	s.False(cfg2.IsDeepEqual(cfg1))
 	cfg1.UniqueKeyColumnNames = curUKCols
+}
+
+func (s *testConfigSuite) TestUtils() {
+	cfg := NewTemplateTableConfigForTest()
+	colDefMap := GenerateColumnDefinitionsMap(cfg.Columns)
+	for _, colDef := range cfg.Columns {
+		colDefInMap, ok := colDefMap[colDef.ColumnName]
+		s.Require().True(ok)
+		s.Require().True(reflect.DeepEqual(colDef, colDefInMap))
+	}
 }
 
 func TestConfigSuite(t *testing.T) {

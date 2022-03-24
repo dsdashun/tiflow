@@ -105,6 +105,8 @@ func main() {
 	}
 
 	theSimulator := core.NewDBSimulator(db, tblConfigMap)
+
+	plog.L().Info("begin to register workloads")
 	for i, workloadConf := range theConfig.Workloads {
 		workloadSimu, err := workload.NewWorkloadSimulatorImpl(tblConfigMap, workloadConf.WorkloadCode)
 		if err != nil {
@@ -116,6 +118,14 @@ func main() {
 		plog.L().Info("add the workload into simulator")
 		theSimulator.AddWorkload(fmt.Sprintf("workload%d", i), workloadSimu)
 	}
+	plog.L().Info("registering workloads [DONE]")
+	plog.L().Info("begin to load all related table schemas")
+	if err := theSimulator.LoadAllTableSchemas(context.Background()); err != nil {
+		plog.L().Error("load all table schemas error", zap.Error(err))
+		gerr = err
+		return
+	}
+	plog.L().Info("loading all related table schemas [DONE]")
 	plog.L().Info("begin to prepare table data")
 	if err := theSimulator.PrepareData(context.Background(), 4096); err != nil {
 		plog.L().Error("prepare table data failed", zap.Error(err))

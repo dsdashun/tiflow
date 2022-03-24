@@ -37,32 +37,6 @@ type testWorkloadSimulatorSuite struct {
 	mcpMap map[string]*mcp.ModificationCandidatePool
 }
 
-func newTemplateTableConfig() *config.TableConfig {
-	return &config.TableConfig{
-		TableID:      "members",
-		DatabaseName: "games",
-		TableName:    "members",
-		Columns: []*config.ColumnDefinition{
-			&config.ColumnDefinition{
-				ColumnName: "id",
-				DataType:   "int",
-			},
-			&config.ColumnDefinition{
-				ColumnName: "name",
-				DataType:   "varchar",
-			},
-			&config.ColumnDefinition{
-				ColumnName: "age",
-				DataType:   "int",
-			},
-			&config.ColumnDefinition{
-				ColumnName: "team_id",
-				DataType:   "int",
-			},
-		},
-		UniqueKeyColumnNames: []string{"id"},
-	}
-}
 func (s *testWorkloadSimulatorSuite) SetupSuite() {
 	assert.Nil(s.T(), log.InitLogger(&log.Config{}))
 	s.mcpMap = make(map[string]*mcp.ModificationCandidatePool)
@@ -130,7 +104,7 @@ func (s *testWorkloadSimulatorSuite) TestBasic() {
 	}
 	theSimulator, err := NewWorkloadSimulatorImpl(
 		map[string]*config.TableConfig{
-			"members": newTemplateTableConfig(),
+			"members": config.NewTemplateTableConfigForTest(),
 		},
 		"RANDOM-DML members;",
 	)
@@ -217,10 +191,10 @@ func (s *testWorkloadSimulatorSuite) TestSchemaChange() {
 	defer cancel()
 	db, mock, err := sqlmock.New()
 	s.Require().Nil(err)
-	tblConfig01 := newTemplateTableConfig()
+	tblConfig01 := config.NewTemplateTableConfigForTest()
 	tblConfig01.TableName = "members01"
 	tblConfig01.TableID = "members01"
-	tblConfig02 := newTemplateTableConfig()
+	tblConfig02 := config.NewTemplateTableConfigForTest()
 	tblConfig02.TableName = "members02"
 	tblConfig02.TableID = "members02"
 	theSimulator, err := NewWorkloadSimulatorImpl(
@@ -300,7 +274,7 @@ func (s *testWorkloadSimulatorSuite) TestParallelSimulation() {
 		}
 		theSimulator, err := NewWorkloadSimulatorImpl(
 			map[string]*config.TableConfig{
-				"members": newTemplateTableConfig(),
+				"members": config.NewTemplateTableConfigForTest(),
 			},
 			"RANDOM-DML members;",
 		)

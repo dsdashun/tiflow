@@ -104,7 +104,7 @@ func (s *workloadSimulatorImpl) DoesInvolveTable(tableID string) bool {
 	return false
 }
 
-func (s *workloadSimulatorImpl) SetTableConfig(tableID string, tblConfig *config.TableConfig) {
+func (s *workloadSimulatorImpl) SetTableConfig(tableID string, tblConfig *config.TableConfig) error {
 	isTableIDUsed := false
 	for _, step := range s.steps {
 		if step.GetTableName() != tableID {
@@ -117,6 +117,7 @@ func (s *workloadSimulatorImpl) SetTableConfig(tableID string, tblConfig *config
 	if isTableIDUsed {
 		s.tblConfigs[tableID] = tblConfig
 	}
+	return nil
 }
 
 // SimulateTrx simulates a transaction for this workload.

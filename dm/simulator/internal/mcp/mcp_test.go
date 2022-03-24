@@ -45,7 +45,15 @@ func (s *testMCPSuite) SetupTest() {
 	s.mcp = mcp
 }
 
-func (s *testMCPSuite) TestNextUK() {
+func (s *testMCPSuite) TestGetUK() {
+	// for basic fetch
+	for i := 0; i < s.mcp.Len(); i++ {
+		theUK := s.mcp.GetUK(i)
+		s.Require().NotNil(theUK)
+		rowID := theUK.GetRowID()
+		s.Require().Equal(i, rowID)
+	}
+	// for random fetch
 	allHitRowIDs := map[int]int{}
 	repeatCnt := 20
 	for i := 0; i < repeatCnt; i++ {

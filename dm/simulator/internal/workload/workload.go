@@ -35,7 +35,7 @@ type WorkloadSimulator interface {
 	// It is called after the table structure has changed,
 	// so that the workload simulator should simulate transactions
 	// using the latest table structure.
-	SetTableConfig(tableID string, tblConfig *config.TableConfig)
+	SetTableConfig(tableID string, tblConfig *config.TableConfig) error
 	// Enable enables this workload.
 	Enable()
 	// Disable disables this workload.

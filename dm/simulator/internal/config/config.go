@@ -16,6 +16,7 @@ package config
 
 import (
 	"os"
+	"reflect"
 
 	"github.com/pingcap/errors"
 	flag "github.com/spf13/pflag"
@@ -69,11 +70,21 @@ type DataSourceConfig struct {
 
 // TableConfig is the sub config for describing a simulating table in the data source.
 type TableConfig struct {
-	TableID              string              `yaml:"id"`
-	DatabaseName         string              `yaml:"db"`
-	TableName            string              `yaml:"table"`
-	Columns              []*ColumnDefinition `yaml:"columns"`
-	UniqueKeyColumnNames []string            `yaml:"unique_keys"`
+	TableID              string `yaml:"id"`
+	DatabaseName         string `yaml:"db"`
+	TableName            string `yaml:"table"`
+	Columns              []*ColumnDefinition
+	UniqueKeyColumnNames []string
+}
+
+func (cfg *TableConfig) SortedClone() *TableConfig {
+	return &TableConfig{
+		TableID:              cfg.TableID,
+		DatabaseName:         cfg.DatabaseName,
+		TableName:            cfg.TableName,
+		Columns:              CloneSortedColumnDefinitions(cfg.Columns),
+		UniqueKeyColumnNames: append([]string{}, cfg.UniqueKeyColumnNames...),
+	}
 }
 
 func (cfgA *TableConfig) IsDeepEqual(cfgB *TableConfig) bool {
@@ -82,34 +93,15 @@ func (cfgA *TableConfig) IsDeepEqual(cfgB *TableConfig) bool {
 	}
 	if cfgA.TableID != cfgB.TableID ||
 		cfgA.DatabaseName != cfgB.DatabaseName ||
-		cfgA.TableName != cfgB.TableName ||
-		len(cfgA.Columns) != len(cfgB.Columns) ||
-		len(cfgA.UniqueKeyColumnNames) != len(cfgB.UniqueKeyColumnNames) {
+		cfgA.TableName != cfgB.TableName {
 		return false
 	}
-	// begin to check the column definitions
-	cfgAColMap := make(map[string]*ColumnDefinition)
-	cfgBColMap := make(map[string]*ColumnDefinition)
-	for _, colDef := range cfgA.Columns {
-		cfgAColMap[colDef.ColumnName] = colDef
-	}
-	for _, colDef := range cfgB.Columns {
-		cfgBColMap[colDef.ColumnName] = colDef
-	}
-	for colName, colDef := range cfgAColMap {
-		cfgBColDef, ok := cfgBColMap[colName]
-		if !ok {
-			return false
-		}
-		if colDef.DataType != cfgBColDef.DataType {
-			return false
-		}
+	if !AreColDefinitionsEqual(cfgA.Columns, cfgB.Columns) {
+		return false
 	}
 	// begin to check the unique key names
-	for i, ukName := range cfgA.UniqueKeyColumnNames {
-		if ukName != cfgB.UniqueKeyColumnNames[i] {
-			return false
-		}
+	if !reflect.DeepEqual(cfgA.UniqueKeyColumnNames, cfgB.UniqueKeyColumnNames) {
+		return false
 	}
 	return true
 }

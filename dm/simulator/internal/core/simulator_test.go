@@ -15,70 +15,25 @@ package core
 
 import (
 	"context"
-	"database/sql"
-	"math/rand"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
-	uatomic "go.uber.org/atomic"
 
 	"github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
-	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
+	"github.com/pingcap/tiflow/dm/simulator/internal/schema"
+	"github.com/pingcap/tiflow/dm/simulator/internal/workload"
 )
-
-type dummyWorkload struct {
-	Name          string
-	TotalExecuted uint64
-	isEnabled     *uatomic.Bool
-}
-
-func NewDummyWorkload(name string) *dummyWorkload {
-	return &dummyWorkload{
-		Name:          name,
-		TotalExecuted: 0,
-		isEnabled:     uatomic.NewBool(true),
-	}
-}
-
-func (w *dummyWorkload) SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*mcp.ModificationCandidatePool) error {
-	atomic.AddUint64(&w.TotalExecuted, 1)
-	return nil
-}
-
-func (w *dummyWorkload) GetInvolvedTables() []string {
-	return []string{w.Name}
-}
-
-func (w *dummyWorkload) SetTableConfig(tableID string, tblConfig *config.TableConfig) {
-}
-
-func (w *dummyWorkload) Enable() {
-	w.isEnabled.Store(true)
-}
-
-func (w *dummyWorkload) Disable() {
-	w.isEnabled.Store(false)
-}
-
-func (w *dummyWorkload) IsEnabled() bool {
-	return w.isEnabled.Load()
-}
-
-func (w *dummyWorkload) DoesInvolveTable(tableID string) bool {
-	return tableID == w.Name
-}
 
 type testDBSimulatorSuite struct {
 	suite.Suite
 }
 
 func (s *testDBSimulatorSuite) SetupSuite() {
-	assert.Nil(s.T(), log.InitLogger(&log.Config{}))
+	s.Require().Nil(log.InitLogger(&log.Config{}))
 }
 
 func mockPrepareData(mock sqlmock.Sqlmock, recordCount int) {
@@ -90,40 +45,9 @@ func mockPrepareData(mock sqlmock.Sqlmock, recordCount int) {
 	mock.ExpectCommit()
 }
 
-func mockLoadUKs(mock sqlmock.Sqlmock, recordCount int) {
-	expectRows := sqlmock.NewRows([]string{"id"})
-	for i := 0; i < recordCount; i++ {
-		expectRows.AddRow(rand.Int())
-	}
-	mock.ExpectQuery("^SELECT").WillReturnRows(expectRows)
-}
-
 func (s *testDBSimulatorSuite) TestPrepareMCP() {
 	tableConfigMap := map[string]*config.TableConfig{
-		"members": &config.TableConfig{
-			TableID:      "members",
-			DatabaseName: "games",
-			TableName:    "members",
-			Columns: []*config.ColumnDefinition{
-				&config.ColumnDefinition{
-					ColumnName: "id",
-					DataType:   "int",
-				},
-				&config.ColumnDefinition{
-					ColumnName: "name",
-					DataType:   "varchar",
-				},
-				&config.ColumnDefinition{
-					ColumnName: "age",
-					DataType:   "int",
-				},
-				&config.ColumnDefinition{
-					ColumnName: "team_id",
-					DataType:   "int",
-				},
-			},
-			UniqueKeyColumnNames: []string{"id"},
-		},
+		"members": config.NewTemplateTableConfigForTest(),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -134,24 +58,39 @@ func (s *testDBSimulatorSuite) TestPrepareMCP() {
 	}
 	recordCount := 128
 	theSimulator := NewDBSimulator(db, tableConfigMap)
-	w1 := NewDummyWorkload("members")
+	w1, err := workload.NewMockWorkload(tableConfigMap)
+	s.Require().Nil(err)
 	theSimulator.AddWorkload("dummy_members", w1)
 	mockPrepareData(mock, recordCount)
-	err = theSimulator.PrepareData(ctx, recordCount)
-	assert.Nil(s.T(), err)
-	mockLoadUKs(mock, recordCount)
-	err = theSimulator.LoadMCP(ctx)
-	assert.Nil(s.T(), err)
-	assert.Equalf(s.T(), recordCount, theSimulator.mcpMap["members"].Len(), "the mcp should have %d items", recordCount)
+	s.Require().Nil(theSimulator.PrepareData(ctx, recordCount))
 }
 
 func (s *testDBSimulatorSuite) TestChooseWorkload() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	simu := NewDBSimulator(nil, nil)
-	w1 := NewDummyWorkload("workload01")
-	w2 := NewDummyWorkload("workload02")
-	w3 := NewDummyWorkload("workload03")
+	cfg1 := config.NewTemplateTableConfigForTest()
+	cfg1.TableID = "tbl01"
+	cfg1.TableName = "member01"
+	cfg2 := config.NewTemplateTableConfigForTest()
+	cfg2.TableID = "tbl02"
+	cfg2.TableName = "member02"
+	simu := NewDBSimulator(nil, map[string]*config.TableConfig{
+		cfg1.TableID: cfg1,
+		cfg2.TableID: cfg2,
+	})
+	w1, err := workload.NewMockWorkload(map[string]*config.TableConfig{
+		cfg1.TableID: cfg1,
+	})
+	s.Require().Nil(err)
+	w2, err := workload.NewMockWorkload(map[string]*config.TableConfig{
+		cfg2.TableID: cfg2,
+	})
+	s.Require().Nil(err)
+	w3, err := workload.NewMockWorkload(map[string]*config.TableConfig{
+		cfg1.TableID: cfg1,
+		cfg2.TableID: cfg2,
+	})
+	s.Require().Nil(err)
 	simu.AddWorkload("w1", w1)
 	simu.AddWorkload("w2", w2)
 	simu.AddWorkload("w3", w3)
@@ -164,12 +103,12 @@ func (s *testDBSimulatorSuite) TestChooseWorkload() {
 		theWorkload := simu.workloadSimulators[workloadName]
 		assert.Nil(s.T(), theWorkload.SimulateTrx(ctx, nil, nil))
 	}
-	w1CurrentExecuted := w1.TotalExecuted
-	w2CurrentExecuted := w2.TotalExecuted
-	w3CurrentExecuted := w3.TotalExecuted
-	assert.Greater(s.T(), w1CurrentExecuted, uint64(0), "workload 01 should at least execute once")
-	assert.Greater(s.T(), w2CurrentExecuted, uint64(0), "workload 02 should at least execute once")
-	assert.Greater(s.T(), w3CurrentExecuted, uint64(0), "workload 03 should at least execute once")
+	w1CurrentExecuted := w1.TotalExecuted(w1.GetCurrentSchemaSignature())
+	w2CurrentExecuted := w2.TotalExecuted(w2.GetCurrentSchemaSignature())
+	w3CurrentExecuted := w3.TotalExecuted(w3.GetCurrentSchemaSignature())
+	s.Greater(w1CurrentExecuted, uint64(0), "workload 01 should at least execute once")
+	s.Greater(w2CurrentExecuted, uint64(0), "workload 02 should at least execute once")
+	s.Greater(w3CurrentExecuted, uint64(0), "workload 03 should at least execute once")
 	w2.Disable()
 	for i := 0; i < 100; i++ {
 		workloadName := randomChooseKeyByWeights(weightMap)
@@ -179,9 +118,9 @@ func (s *testDBSimulatorSuite) TestChooseWorkload() {
 		}
 		s.Nil(theWorkload.SimulateTrx(ctx, nil, nil))
 	}
-	s.Equal(w2CurrentExecuted, w2.TotalExecuted, "workload 02 should not be executed after disabled")
-	w1CurrentExecuted = w1.TotalExecuted
-	w3CurrentExecuted = w3.TotalExecuted
+	s.Equal(w2CurrentExecuted, w2.TotalExecuted(w2.GetCurrentSchemaSignature()), "workload 02 should not be executed after disabled")
+	w1CurrentExecuted = w1.TotalExecuted(w1.GetCurrentSchemaSignature())
+	w3CurrentExecuted = w3.TotalExecuted(w3.GetCurrentSchemaSignature())
 	w2.Enable()
 	simu.RemoveWorkload("w3")
 	weightMap = make(map[string]int)
@@ -196,27 +135,79 @@ func (s *testDBSimulatorSuite) TestChooseWorkload() {
 		}
 		s.Nil(theWorkload.SimulateTrx(ctx, nil, nil))
 	}
-	assert.Greater(s.T(), w1.TotalExecuted, w1CurrentExecuted, "workload 01 should at least execute once")
-	assert.Greater(s.T(), w2.TotalExecuted, w2CurrentExecuted, "workload 02 should at least execute once")
-	assert.Equal(s.T(), w3.TotalExecuted, w3CurrentExecuted, "workload 03 should keep the executed count")
+	assert.Greater(s.T(), w1.TotalExecuted(w1.GetCurrentSchemaSignature()), w1CurrentExecuted, "workload 01 should at least execute once")
+	assert.Greater(s.T(), w2.TotalExecuted(w2.GetCurrentSchemaSignature()), w2CurrentExecuted, "workload 02 should at least execute once")
+	assert.Equal(s.T(), w3.TotalExecuted(w3.GetCurrentSchemaSignature()), w3CurrentExecuted, "workload 03 should keep the executed count")
 }
 
 func (s *testDBSimulatorSuite) TestStartStopSimulation() {
-	var err error
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	simu := NewDBSimulator(nil, nil)
-	w1 := NewDummyWorkload("workload01")
-	w2 := NewDummyWorkload("workload02")
+	cfg1 := config.NewTemplateTableConfigForTest()
+	cfg1.TableID = "tbl01"
+	cfg1.TableName = "member01"
+	cfg2 := config.NewTemplateTableConfigForTest()
+	cfg2.TableID = "tbl02"
+	cfg2.TableName = "member02"
+	cfgMap := map[string]*config.TableConfig{
+		cfg1.TableID: cfg1,
+		cfg2.TableID: cfg2,
+	}
+	mockSG := schema.NewMockSchemaGetter()
+	mockSG.SetFromTableConfig(cfg1)
+	mockSG.SetFromTableConfig(cfg2)
+
+	mockMCPLoader := NewMockMCPLoader(4096)
+
+	simu := NewDBSimulator(nil, cfgMap)
+	simu.sg = mockSG
+	simu.mcpLoader = mockMCPLoader
+	w1, err := workload.NewMockWorkload(map[string]*config.TableConfig{
+		cfg1.TableID: cfg1,
+	})
+	s.Require().Nil(err)
+	w2, err := workload.NewMockWorkload(map[string]*config.TableConfig{
+		cfg2.TableID: cfg2,
+	})
+	s.Require().Nil(err)
+	w3, err := workload.NewMockWorkload(map[string]*config.TableConfig{
+		cfg1.TableID: cfg1,
+		cfg2.TableID: cfg2,
+	})
+	s.Require().Nil(err)
 	simu.AddWorkload("w1", w1)
 	simu.AddWorkload("w2", w2)
-	err = simu.StartSimulation(ctx)
-	assert.Nil(s.T(), err)
+	simu.AddWorkload("w3", w3)
+	s.Require().Nil(simu.StartSimulation(ctx))
 	time.Sleep(1 * time.Second)
-	err = simu.StopSimulation()
-	assert.Nil(s.T(), err)
-	assert.Greater(s.T(), w1.TotalExecuted, uint64(0), "workload 01 should at least execute once")
-	assert.Greater(s.T(), w2.TotalExecuted, uint64(0), "workload 02 should at least execute once")
+	s.Require().Nil(simu.StopSimulation())
+	w1SchemaSig := w1.GetCurrentSchemaSignature()
+	w2SchemaSig := w2.GetCurrentSchemaSignature()
+	w3SchemaSig := w3.GetCurrentSchemaSignature()
+	s.Greater(w1.TotalExecuted(w1SchemaSig), uint64(0), "workload 01 should at least execute once")
+	s.Greater(w2.TotalExecuted(w2SchemaSig), uint64(0), "workload 02 should at least execute once")
+	s.Greater(w3.TotalExecuted(w3SchemaSig), uint64(0), "workload 03 should at least execute once")
+	// start again
+	newCfg2 := cfg2.SortedClone()
+	newCfg2.Columns = append(newCfg2.Columns, &config.ColumnDefinition{
+		ColumnName: "dummycol",
+		DataType:   "varchar",
+	})
+	s.Require().Nil(simu.StartSimulation(ctx))
+	mockSG.SetFromTableConfig(newCfg2)
+	time.Sleep(1 * time.Second)
+	s.Require().Nil(simu.StopSimulation())
+
+	newW1SchemaSig := w1.GetCurrentSchemaSignature()
+	newW2SchemaSig := w2.GetCurrentSchemaSignature()
+	newW3SchemaSig := w3.GetCurrentSchemaSignature()
+
+	s.Equal(w1SchemaSig, newW1SchemaSig)
+	s.NotEqual(w2SchemaSig, newW2SchemaSig)
+	s.NotEqual(w3SchemaSig, newW3SchemaSig)
+	s.Greater(w1.TotalExecuted(newW1SchemaSig), uint64(0), "workload 01 should at least execute once")
+	s.Greater(w2.TotalExecuted(newW2SchemaSig), uint64(0), "workload 02 should at least execute once")
+	s.Greater(w3.TotalExecuted(newW3SchemaSig), uint64(0), "workload 03 should at least execute once")
 }
 
 func TestDBSimulatorSuite(t *testing.T) {

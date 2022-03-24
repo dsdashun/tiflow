@@ -38,8 +38,8 @@ func (s *testMySQLSchemaGenSuite) TestGetTableDefinitionBasic() {
 	// TODO: change to mock SQL later
 	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%d)/", "root", "guanliyuanmima", "127.0.0.1", 13306))
 	s.Require().Nil(err)
-	schemaGetter := NewMySQLSchemaGetter(db, "games", "members")
-	colDefs, err := schemaGetter.GetColumnDefinitions(ctx)
+	schemaGetter := NewMySQLSchemaGetter(db)
+	colDefs, err := schemaGetter.GetColumnDefinitions(ctx, "games", "members")
 	s.Require().Nil(err)
 	for _, col := range colDefs {
 		s.T().Logf("column def: %+v\n", col)
@@ -52,8 +52,8 @@ func (s *testMySQLSchemaGenSuite) TestGetUniqueKeyColumnsBasic() {
 	// TODO: change to mock SQL later
 	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%d)/", "root", "guanliyuanmima", "127.0.0.1", 13306))
 	s.Require().Nil(err)
-	schemaGetter := NewMySQLSchemaGetter(db, "games", "members")
-	ukCols, err := schemaGetter.GetUniqueKeyColumns(ctx)
+	schemaGetter := NewMySQLSchemaGetter(db)
+	ukCols, err := schemaGetter.GetUniqueKeyColumns(ctx, "games", "members")
 	s.Require().Nil(err)
 	s.T().Logf("uk columns: %+v\n", ukCols)
 }

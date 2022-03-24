@@ -17,9 +17,17 @@ package core
 
 import (
 	"context"
+
+	"github.com/pingcap/tiflow/dm/simulator/internal/config"
+	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
 )
 
+type MCPLoader interface {
+	LoadMCP(ctx context.Context, tblConf *config.TableConfig) (*mcp.ModificationCandidatePool, error)
+}
+
 // Simulator defines all the basic operations of a simulator.
+// In the future, each method will be mapped to an API
 type Simulator interface {
 	// StartSimulation starts the simulation.
 	StartSimulation(ctx context.Context) error

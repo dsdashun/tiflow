@@ -22,12 +22,8 @@ import (
 
 // SchemaGetter defines the operations on getting the schema of a table.
 type SchemaGetter interface {
-	// GetDatabaseName gets the database name of the table
-	GetDatabaseName() string
-	// GetTableName gets the table name of the table
-	GetTableName() string
 	// GetColumnDefinitions gets the column definitions of a table.
-	GetColumnDefinitions(ctx context.Context) ([]*config.ColumnDefinition, error)
+	GetColumnDefinitions(ctx context.Context, dbName string, tableName string) ([]*config.ColumnDefinition, error)
 	// GetUniqueKeyColumns gets the columns of a unique key in a table.
-	GetUniqueKeyColumns(ctx context.Context) ([]string, error)
+	GetUniqueKeyColumns(ctx context.Context, dbName string, tableName string) ([]string, error)
 }

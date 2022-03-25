@@ -1,0 +1,58 @@
+openapi: "3.0.0"
+info:
+  title: Simulator OpenAPI DOC
+  version: "0.0.1"
+paths:
+  /api/v1/sources/{source-name}/tables/{table-id}/ddl:
+    post:
+      summary: "apply a DDL to the simulating table"
+      operationId: "ApplyDDL"
+      parameters:
+        - name: "source-name"
+          in: path
+          description: "globally unique data source name"
+          required: true
+          schema:
+            type: string
+            example: "mysql-01"
+        - name: "table-id"
+          in: path
+          description: "unique table id in a data source"
+          required: true
+          schema:
+            type: string
+            example: "table-01"
+      requestBody:
+        description: "DDL SQL statement without the 'ALTER TABLE <table_name>' prefix"
+        required: true
+        content:
+          "application/sql":
+            schema:
+              type: string
+      responses:
+        "200":
+          description: "success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/BasicResponse"
+        "500":
+          description: "failed"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/BasicResponse"
+components:
+  schemas:
+    BasicResponse:
+      description: "basic response"
+      type: object
+      properties:
+        return_code:
+          type: integer
+          description: "Return code.  Usually 0 means OK."
+        error_msg:
+          type: string
+          description: "Detail error message if return code is not OK"
+      required:
+        - "return_code"

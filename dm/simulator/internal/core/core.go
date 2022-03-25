@@ -17,6 +17,7 @@ package core
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
@@ -28,10 +29,22 @@ type MCPLoader interface {
 
 // Simulator defines all the basic operations of a simulator.
 // In the future, each method will be mapped to an API
-type Simulator interface {
+type DBSimulatorInterface interface {
 	// StartSimulation starts the simulation.
 	StartSimulation(ctx context.Context) error
 
 	// StopSimulation stops the simulation.
 	StopSimulation() error
+
+	// GetTableConfig gets the table config of a table
+	GetTableConfig(tableName string) *config.TableConfig
+
+	// Prepare prepares for starting the simulation.
+	Prepare(ctx context.Context) error
+
+	// GetDB gets the *sql.DB object for the simulator.
+	GetDB() *sql.DB
+
+	// GetContext gets the context of this simulator
+	GetContext() context.Context
 }

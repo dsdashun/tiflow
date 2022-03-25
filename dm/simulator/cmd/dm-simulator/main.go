@@ -23,13 +23,13 @@ import (
 	"syscall"
 
 	"github.com/pingcap/errors"
-	flag "github.com/spf13/pflag"
-	"go.uber.org/zap"
-
 	plog "github.com/pingcap/tiflow/dm/pkg/log"
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 	"github.com/pingcap/tiflow/dm/simulator/internal/core"
+	"github.com/pingcap/tiflow/dm/simulator/internal/server"
 	"github.com/pingcap/tiflow/dm/simulator/internal/workload"
+	flag "github.com/spf13/pflag"
+	"go.uber.org/zap"
 )
 
 func main() {
@@ -126,31 +126,16 @@ func main() {
 		return
 	}
 	plog.L().Info("loading all related table schemas [DONE]")
-	plog.L().Info("begin to prepare table data")
-	if err := theSimulator.PrepareData(context.Background(), 4096); err != nil {
-		plog.L().Error("prepare table data failed", zap.Error(err))
-		gerr = err
-		return
-	}
-	plog.L().Info("prepare table data [DONE]")
-	plog.L().Info("begin to load UKs into MCP")
-	if err := theSimulator.LoadMCP(context.Background()); err != nil {
-		plog.L().Error("load UKs of table into MCP failed", zap.Error(err))
-		gerr = err
-		return
-	}
-	plog.L().Info("loading UKs into MCP [DONE]")
-
-	plog.L().Info("start simulation")
-	if err := theSimulator.StartSimulation(ctx); err != nil {
-		plog.L().Error("start simulation failed", zap.Error(err))
+	srv := server.NewServer()
+	srv.SetDBSimulator(dbConfig.DataSourceID, theSimulator)
+	if err := srv.Start(ctx); err != nil {
+		plog.L().Error("start server error", zap.Error(err))
 		gerr = err
 		return
 	}
 	<-ctx.Done()
-	plog.L().Info("simulation terminated")
-	if err := theSimulator.StopSimulation(); err != nil {
-		plog.L().Error("stop simulation failed", zap.Error(err))
+	if err := srv.Stop(); err != nil {
+		plog.L().Error("stop server error", zap.Error(err))
 		gerr = err
 		return
 	}

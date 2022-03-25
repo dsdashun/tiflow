@@ -61,11 +61,12 @@ func NewConfigFromFile(configFile string) (*Config, error) {
 
 // DataSourceConfig is the sub config for describing a DB data source.
 type DataSourceConfig struct {
-	Host     string         `yaml:"host"`
-	Port     int            `yaml:"port"`
-	UserName string         `yaml:"user"`
-	Password string         `yaml:"password"`
-	Tables   []*TableConfig `yaml:"tables"`
+	DataSourceID string         `yaml:"id"`
+	Host         string         `yaml:"host"`
+	Port         int            `yaml:"port"`
+	UserName     string         `yaml:"user"`
+	Password     string         `yaml:"password"`
+	Tables       []*TableConfig `yaml:"tables"`
 }
 
 // TableConfig is the sub config for describing a simulating table in the data source.

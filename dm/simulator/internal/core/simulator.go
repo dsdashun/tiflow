@@ -62,6 +62,18 @@ func NewDBSimulator(db *sql.DB, tblConfigs map[string]*config.TableConfig) *DBSi
 	}
 }
 
+func (s *DBSimulator) GetTableConfig(tableName string) *config.TableConfig {
+	return s.tblConfigs[tableName]
+}
+
+func (s *DBSimulator) GetDB() *sql.DB {
+	return s.db
+}
+
+func (s *DBSimulator) GetContext() context.Context {
+	return s.ctx
+}
+
 // workerFn is the main loop for a simulation worker.
 // It will continuously receive a workload and simulate a transaction for it.
 func (s *DBSimulator) workerFn(ctx context.Context, workloadCh <-chan workload.WorkloadSimulator) {
@@ -246,16 +258,14 @@ func (s *DBSimulator) StopSimulation() error {
 	}
 	// atomic operations on closing the server
 	plog.L().Info("begin to stop the DB simulator")
-	func() {
-		s.Lock()
-		defer s.Unlock()
-		s.cancel()
-		plog.L().Info("begin to wait all the goroutines to finish")
-		s.wg.Wait() // wait all sub-goroutines finished
-		plog.L().Info("all the goroutines finished")
-		s.isRunning.Store(false)
-		plog.L().Info("the DB simulator is stopped")
-	}()
+	s.Lock()
+	defer s.Unlock()
+	s.cancel()
+	plog.L().Info("begin to wait all the goroutines to finish")
+	s.wg.Wait() // wait all sub-goroutines finished
+	plog.L().Info("all the goroutines finished")
+	s.isRunning.Store(false)
+	plog.L().Info("the DB simulator is stopped")
 	return nil
 }
 
@@ -418,5 +428,24 @@ func (s *DBSimulator) LoadAllTableSchemas(ctx context.Context) error {
 			ws.SetTableConfig(tableID, newTableConfig)
 		}
 	}
+	return nil
+}
+
+func (s *DBSimulator) Prepare(ctx context.Context) error {
+	plog.L().Info("begin to load table schemas")
+	if err := s.LoadAllTableSchemas(ctx); err != nil {
+		return errors.Annotate(err, "load all table schemas error")
+	}
+	plog.L().Info("loading table schemas [DONE]")
+	plog.L().Info("begin to prepare table data")
+	if err := s.PrepareData(ctx, 4096); err != nil {
+		return errors.Annotate(err, "prepare data error")
+	}
+	plog.L().Info("preparing table data [DONE]")
+	plog.L().Info("begin to load UKs into MCP")
+	if err := s.LoadMCP(ctx); err != nil {
+		return errors.Annotate(err, "load data into MCP error")
+	}
+	plog.L().Info("loading UKs into MCP [DONE]")
 	return nil
 }

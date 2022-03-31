@@ -1,0 +1,47 @@
+---
+data_sources:
+  - id: "db01"
+    host: 127.0.0.1
+    port: 13306
+    user: root
+    password: guanliyuanmima
+    tables:
+      - id: members_tbl01
+        db: games
+        table: members
+      - id: members_tbl02
+        db: games
+        table: members02
+  - id: "db02"
+    host: 127.0.0.1
+    port: 23306
+    user: root
+    password: guanliyuanmima
+    tables:
+      - id: members_tbl01
+        db: games
+        table: members
+      - id: members_tbl02
+        db: games
+        table: members02
+workloads:
+  - data_sources: 
+    - db01
+    - db02
+    dsl_code: |
+      RANDOM-DML members_tbl01;
+  - data_sources: 
+    - db01
+    - db02
+    dsl_code: |
+      REPEAT 3 (
+        UPDATE members_tbl02;
+      );
+  - data_sources: 
+    - db02
+    dsl_code: |
+      @therow = INSERT members_tbl02;
+      REPEAT 3 (
+        UPDATE @therow;
+      );
+      DELETE @therow;

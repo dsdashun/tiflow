@@ -933,3 +933,50 @@ func (s *Server) GetWorkerCfg(ctx context.Context, req *pb.GetWorkerCfgRequest) 
 	resp.Cfg, err = s.cfg.Toml()
 	return resp, err
 }
+
+// CheckSubtasksCanUpdate check if input subtask cfg can be updated.
+func (s *Server) CheckSubtasksCanUpdate(ctx context.Context, req *pb.CheckSubtasksCanUpdateRequest) (*pb.CheckSubtasksCanUpdateResponse, error) {
+	log.L().Info("", zap.String("request", "CheckSubtasksCanUpdate"), zap.Stringer("payload", req))
+	resp := &pb.CheckSubtasksCanUpdateResponse{}
+	defer func() {
+		log.L().Info("", zap.String("request", "CheckSubtasksCanUpdate"), zap.Stringer("resp", resp))
+	}()
+	w := s.getSourceWorker(true)
+	if w == nil {
+		msg := "fail to call CheckSubtasksCanUpdate, because no mysql source is being handled in the worker"
+		log.L().Warn(msg)
+		resp.Msg = msg
+		return resp, nil
+	}
+	cfg := config.NewSubTaskConfig()
+	if err := cfg.Decode(req.SubtaskCfgTomlString, false); err != nil {
+		resp.Msg = err.Error()
+		// nolint:nilerr
+		return resp, nil
+	}
+	if err := w.CheckCfgCanUpdated(cfg); err != nil {
+		resp.Msg = err.Error()
+		// nolint:nilerr
+		return resp, nil
+	}
+	resp.Success = true
+	return resp, nil
+}
+
+func (s *Server) GetWorkerValidateStatus(ctx context.Context, req *pb.GetValidationStatusRequest) (*pb.GetValidationStatusResponse, error) {
+	log.L().Info("", zap.String("request", "GetWorkerValidateStatus"), zap.Stringer("payload", req))
+
+	resp := &pb.GetValidationStatusResponse{
+		Result: true,
+	}
+	w := s.getSourceWorker(true)
+	if w == nil {
+		log.L().Warn("fail to call GetWorkerValidateStatus, because no mysql source is being handled in the worker")
+		resp.Result = false
+		resp.Msg = terror.ErrWorkerNoStart.Error()
+		return resp, nil
+	}
+	res := w.GetValidateStatus(req.TaskName, req.FilterStatus)
+	resp.Status = res
+	return resp, nil
+}

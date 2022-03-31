@@ -36,6 +36,26 @@ func (m *MockWorkerClient) EXPECT() *MockWorkerClientMockRecorder {
 	return m.recorder
 }
 
+// CheckSubtasksCanUpdate mocks base method.
+func (m *MockWorkerClient) CheckSubtasksCanUpdate(arg0 context.Context, arg1 *pb.CheckSubtasksCanUpdateRequest, arg2 ...grpc.CallOption) (*pb.CheckSubtasksCanUpdateResponse, error) {
+	m.ctrl.T.Helper()
+	varargs := []interface{}{arg0, arg1}
+	for _, a := range arg2 {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "CheckSubtasksCanUpdate", varargs...)
+	ret0, _ := ret[0].(*pb.CheckSubtasksCanUpdateResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CheckSubtasksCanUpdate indicates an expected call of CheckSubtasksCanUpdate.
+func (mr *MockWorkerClientMockRecorder) CheckSubtasksCanUpdate(arg0, arg1 interface{}, arg2 ...interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]interface{}{arg0, arg1}, arg2...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckSubtasksCanUpdate", reflect.TypeOf((*MockWorkerClient)(nil).CheckSubtasksCanUpdate), varargs...)
+}
+
 // GetWorkerCfg mocks base method.
 func (m *MockWorkerClient) GetWorkerCfg(arg0 context.Context, arg1 *pb.GetWorkerCfgRequest, arg2 ...grpc.CallOption) (*pb.GetWorkerCfgResponse, error) {
 	m.ctrl.T.Helper()
@@ -54,6 +74,26 @@ func (mr *MockWorkerClientMockRecorder) GetWorkerCfg(arg0, arg1 interface{}, arg
 	mr.mock.ctrl.T.Helper()
 	varargs := append([]interface{}{arg0, arg1}, arg2...)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetWorkerCfg", reflect.TypeOf((*MockWorkerClient)(nil).GetWorkerCfg), varargs...)
+}
+
+// GetWorkerValidateStatus mocks base method.
+func (m *MockWorkerClient) GetWorkerValidateStatus(arg0 context.Context, arg1 *pb.GetValidationStatusRequest, arg2 ...grpc.CallOption) (*pb.GetValidationStatusResponse, error) {
+	m.ctrl.T.Helper()
+	varargs := []interface{}{arg0, arg1}
+	for _, a := range arg2 {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "GetWorkerValidateStatus", varargs...)
+	ret0, _ := ret[0].(*pb.GetValidationStatusResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetWorkerValidateStatus indicates an expected call of GetWorkerValidateStatus.
+func (mr *MockWorkerClientMockRecorder) GetWorkerValidateStatus(arg0, arg1 interface{}, arg2 ...interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]interface{}{arg0, arg1}, arg2...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetWorkerValidateStatus", reflect.TypeOf((*MockWorkerClient)(nil).GetWorkerValidateStatus), varargs...)
 }
 
 // HandleError mocks base method.
@@ -179,6 +219,21 @@ func (m *MockWorkerServer) EXPECT() *MockWorkerServerMockRecorder {
 	return m.recorder
 }
 
+// CheckSubtasksCanUpdate mocks base method.
+func (m *MockWorkerServer) CheckSubtasksCanUpdate(arg0 context.Context, arg1 *pb.CheckSubtasksCanUpdateRequest) (*pb.CheckSubtasksCanUpdateResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CheckSubtasksCanUpdate", arg0, arg1)
+	ret0, _ := ret[0].(*pb.CheckSubtasksCanUpdateResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CheckSubtasksCanUpdate indicates an expected call of CheckSubtasksCanUpdate.
+func (mr *MockWorkerServerMockRecorder) CheckSubtasksCanUpdate(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckSubtasksCanUpdate", reflect.TypeOf((*MockWorkerServer)(nil).CheckSubtasksCanUpdate), arg0, arg1)
+}
+
 // GetWorkerCfg mocks base method.
 func (m *MockWorkerServer) GetWorkerCfg(arg0 context.Context, arg1 *pb.GetWorkerCfgRequest) (*pb.GetWorkerCfgResponse, error) {
 	m.ctrl.T.Helper()
@@ -192,6 +247,21 @@ func (m *MockWorkerServer) GetWorkerCfg(arg0 context.Context, arg1 *pb.GetWorker
 func (mr *MockWorkerServerMockRecorder) GetWorkerCfg(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetWorkerCfg", reflect.TypeOf((*MockWorkerServer)(nil).GetWorkerCfg), arg0, arg1)
+}
+
+// GetWorkerValidateStatus mocks base method.
+func (m *MockWorkerServer) GetWorkerValidateStatus(arg0 context.Context, arg1 *pb.GetValidationStatusRequest) (*pb.GetValidationStatusResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetWorkerValidateStatus", arg0, arg1)
+	ret0, _ := ret[0].(*pb.GetValidationStatusResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetWorkerValidateStatus indicates an expected call of GetWorkerValidateStatus.
+func (mr *MockWorkerServerMockRecorder) GetWorkerValidateStatus(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetWorkerValidateStatus", reflect.TypeOf((*MockWorkerServer)(nil).GetWorkerValidateStatus), arg0, arg1)
 }
 
 // HandleError mocks base method.

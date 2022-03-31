@@ -30,8 +30,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/tidb-tools/pkg/dbutil"
 	toolutils "github.com/pingcap/tidb-tools/pkg/utils"
+	"github.com/pingcap/tidb/util/dbutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/atomic"
@@ -878,10 +878,13 @@ func (s *Server) ShowDDLLocks(ctx context.Context, req *pb.ShowDDLLocksRequest) 
 	// show pessimistic locks.
 	resp.Locks = append(resp.Locks, s.pessimist.ShowLocks(req.Task, req.Sources)...)
 	// show optimistic locks.
-	resp.Locks = append(resp.Locks, s.optimist.ShowLocks(req.Task, req.Sources)...)
+	locks, err := s.optimist.ShowLocks(req.Task, req.Sources)
+	resp.Locks = append(resp.Locks, locks...)
 
 	if len(resp.Locks) == 0 {
 		resp.Msg = "no DDL lock exists"
+	} else if err != nil {
+		resp.Msg = fmt.Sprintf("may lost owner and ddls info for optimistic locks, err: %s", err)
 	}
 	return resp, nil
 }
@@ -906,22 +909,30 @@ func (s *Server) UnlockDDLLock(ctx context.Context, req *pb.UnlockDDLLockRequest
 		return resp, nil
 	}
 	subtasks := s.scheduler.GetSubTaskCfgsByTask(task)
+	unlockType := config.ShardPessimistic
 	if len(subtasks) > 0 {
 		// subtasks should have same ShardMode
 		for _, subtask := range subtasks {
 			if subtask.ShardMode == config.ShardOptimistic {
-				resp.Msg = "`unlock-ddl-lock` is only supported in pessimistic shard mode currently"
-				return resp, nil
+				unlockType = config.ShardOptimistic
 			}
-			break
 		}
 	} else {
 		// task is deleted so worker is not watching etcd, automatically set --force-remove
 		req.ForceRemove = true
 	}
 
-	// TODO: add `unlock-ddl-lock` support for Optimist later.
-	err := s.pessimist.UnlockLock(ctx, req.ID, req.ReplaceOwner, req.ForceRemove)
+	var err error
+	switch unlockType {
+	case config.ShardPessimistic:
+		err = s.pessimist.UnlockLock(ctx, req.ID, req.ReplaceOwner, req.ForceRemove)
+	case config.ShardOptimistic:
+		if len(req.Sources) != 1 {
+			resp.Msg = "optimistic locks should have only one source"
+			return resp, nil
+		}
+		err = s.optimist.UnlockLock(ctx, req.ID, req.Sources[0], req.Database, req.Table, req.Op)
+	}
 	if err != nil {
 		resp.Msg = err.Error()
 	} else {
@@ -1080,7 +1091,8 @@ func (s *Server) getTaskSourceNameList(taskName string) []string {
 
 // getStatusFromWorkers does RPC request to get status from dm-workers.
 func (s *Server) getStatusFromWorkers(
-	ctx context.Context, sources []string, taskName string, specifiedSource bool) []*pb.QueryStatusResponse {
+	ctx context.Context, sources []string, taskName string, specifiedSource bool,
+) []*pb.QueryStatusResponse {
 	workerReq := &workerrpc.Request{
 		Type:        workerrpc.CmdQueryStatus,
 		QueryStatus: &pb.QueryStatusRequest{Name: taskName},
@@ -1615,6 +1627,9 @@ func withHost(addr string) string {
 }
 
 func (s *Server) removeMetaData(ctx context.Context, taskName, metaSchema string, toDBCfg *config.DBConfig) error {
+	failpoint.Inject("MockSkipRemoveMetaData", func() {
+		failpoint.Return(nil)
+	})
 	toDBCfg.Adjust()
 
 	// clear shard meta data for pessimistic/optimist
@@ -1662,6 +1677,14 @@ func (s *Server) removeMetaData(ctx context.Context, taskName, metaSchema string
 		dbutil.TableName(metaSchema, cputil.SyncerShardMeta(taskName))))
 	sqls = append(sqls, fmt.Sprintf("DROP TABLE IF EXISTS %s",
 		dbutil.TableName(metaSchema, cputil.SyncerOnlineDDL(taskName))))
+	sqls = append(sqls, fmt.Sprintf("DROP TABLE IF EXISTS %s",
+		dbutil.TableName(metaSchema, cputil.ValidatorCheckpoint(taskName))))
+	sqls = append(sqls, fmt.Sprintf("DROP TABLE IF EXISTS %s",
+		dbutil.TableName(metaSchema, cputil.ValidatorPendingChange(taskName))))
+	sqls = append(sqls, fmt.Sprintf("DROP TABLE IF EXISTS %s",
+		dbutil.TableName(metaSchema, cputil.ValidatorErrorChange(taskName))))
+	sqls = append(sqls, fmt.Sprintf("DROP TABLE IF EXISTS %s",
+		dbutil.TableName(metaSchema, cputil.ValidatorTableStatus(taskName))))
 
 	_, err = dbConn.ExecuteSQL(ctctx, nil, taskName, sqls)
 	if err == nil {
@@ -2679,12 +2702,12 @@ func (s *Server) StopValidation(ctx context.Context, req *pb.StopValidationReque
 func (s *Server) GetValidationStatus(ctx context.Context, req *pb.GetValidationStatusRequest) (*pb.GetValidationStatusResponse, error) {
 	var (
 		resp2       *pb.GetValidationStatusResponse
-		err2, err   error
+		err         error
 		subTaskCfgs map[string]map[string]config.SubTaskConfig
 	)
-	shouldRet := s.sharedLogic(ctx, req, &resp2, &err2)
+	shouldRet := s.sharedLogic(ctx, req, &resp2, &err)
 	if shouldRet {
-		return resp2, err2
+		return resp2, err
 	}
 	resp := &pb.GetValidationStatusResponse{
 		Result: true,
@@ -2694,10 +2717,11 @@ func (s *Server) GetValidationStatus(ctx context.Context, req *pb.GetValidationS
 		resp.Msg = "task name should be specified"
 		return resp, nil
 	}
-	if req.FilterStatus != strings.ToLower(pb.Stage_Running.String()) && req.FilterStatus != strings.ToLower(pb.Stage_Stopped.String()) {
+	if req.FilterStatus != pb.Stage_InvalidStage && req.FilterStatus != pb.Stage_Running && req.FilterStatus != pb.Stage_Stopped {
 		resp.Result = false
-		resp.Msg = fmt.Sprintf("filtering stage should be either `%s` or `%s`", strings.ToLower(pb.Stage_Running.String()), strings.ToLower(pb.Stage_Stopped.String()))
-		return resp, err
+		resp.Msg = fmt.Sprintf("filtering stage should be either `%s`, `%s`, or empty", strings.ToLower(pb.Stage_Running.String()), strings.ToLower(pb.Stage_Stopped.String()))
+		// nolint:nilerr
+		return resp, nil
 	}
 	subTaskCfgs = s.scheduler.GetSubTaskCfgsByTaskAndSource(req.TaskName, []string{})
 	if len(subTaskCfgs) == 0 {
@@ -2706,9 +2730,68 @@ func (s *Server) GetValidationStatus(ctx context.Context, req *pb.GetValidationS
 		// nolint:nilerr
 		return resp, nil
 	}
-	// TODO: get validation status from worker
 	log.L().Info("query validation status", zap.Reflect("subtask", subTaskCfgs))
-	return resp, err
+	var (
+		workerResps  = make([]*pb.GetValidationStatusResponse, 0)
+		workerRespMu sync.Mutex
+		wg           sync.WaitGroup
+	)
+	appendResp := func(resp *pb.GetValidationStatusResponse) {
+		workerRespMu.Lock()
+		workerResps = append(workerResps, resp)
+		workerRespMu.Unlock()
+	}
+	handleError := func(err error, source, worker string) {
+		log.L().Error("query validation status error", zap.Error(err), zap.String("source", source), zap.String("worker", worker))
+		resp = &pb.GetValidationStatusResponse{
+			Result: false,
+			Msg:    err.Error(),
+		}
+		appendResp(resp)
+	}
+	for taskName, mSource := range subTaskCfgs {
+		for sourceID := range mSource {
+			worker := s.scheduler.GetWorkerBySource(sourceID)
+			if worker == nil {
+				err := terror.ErrMasterWorkerArgsExtractor.Generatef("%s relevant worker-client not found", sourceID)
+				handleError(err, sourceID, "")
+				continue
+			}
+			wg.Add(1)
+			go s.ap.Emit(ctx, 0, func(args ...interface{}) {
+				// send request in parallel
+				defer wg.Done()
+				newReq := &workerrpc.Request{
+					GetValidationStatus: &pb.GetValidationStatusRequest{},
+					Type:                workerrpc.CmdGetValidationStatus,
+				}
+				*newReq.GetValidationStatus = *req
+				newReq.GetValidationStatus.TaskName = taskName
+				resp, err := worker.SendRequest(ctx, newReq, s.cfg.RPCTimeout)
+				if err != nil {
+					handleError(err, sourceID, worker.BaseInfo().Name)
+				} else {
+					appendResp(resp.GetValidationStatus)
+				}
+			}, func(args ...interface{}) {
+				defer wg.Done()
+				workerName := worker.BaseInfo().Name
+				handleError(terror.ErrMasterNoEmitToken.Generate(sourceID), sourceID, workerName)
+			})
+		}
+	}
+	wg.Wait()
+	// todo: sort?
+	for _, wresp := range workerResps {
+		if !wresp.Result {
+			resp.Result = wresp.Result
+			resp.Msg += wresp.Msg + "; "
+			continue
+		}
+		resp.Status = append(resp.Status, wresp.Status...)
+	}
+	// nolint:nilerr
+	return resp, nil
 }
 
 func (s *Server) GetValidationError(ctx context.Context, req *pb.GetValidationErrorRequest) (*pb.GetValidationErrorResponse, error) {

@@ -115,5 +115,6 @@ type ColumnDefinition struct {
 
 // WorkloadConfig is the configuration to describe the attributes of a workload.
 type WorkloadConfig struct {
-	WorkloadCode string `yaml:"dsl_code"`
+	DataSources  []string `yaml:"data_sources"`
+	WorkloadCode string   `yaml:"dsl_code"`
 }

@@ -10,6 +10,11 @@ import (
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 )
 
+const (
+	sqlGetColumnDefinitions string = "SELECT COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME=?"
+	sqlGetIndex             string = "SHOW INDEX FROM %s.%s WHERE Non_unique=0"
+)
+
 // MySQLSchemaGetter implementes the logic on  getting the schema of a MySQL table.
 // It implements the `SchemaGetter` interface.
 type MySQLSchemaGetter struct {
@@ -26,7 +31,7 @@ func NewMySQLSchemaGetter(db *sql.DB) *MySQLSchemaGetter {
 // GetColumnDefinitions gets the column definitions of a MySQL table.
 // It impelements the `SchemaGetter` interface.
 func (g *MySQLSchemaGetter) GetColumnDefinitions(ctx context.Context, dbName string, tableName string) ([]*config.ColumnDefinition, error) {
-	rows, err := g.db.QueryContext(ctx, "SELECT COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME=?", dbName, tableName)
+	rows, err := g.db.QueryContext(ctx, sqlGetColumnDefinitions, dbName, tableName)
 	if err != nil {
 		return nil, errors.Annotate(err, "query DB error")
 	}
@@ -59,7 +64,7 @@ type uniqueKeyInfo struct {
 // GetUniqueKeyColumns gets the columns of a unique key in a MySQL table.
 // It impelements the `SchemaGetter` interface.
 func (g *MySQLSchemaGetter) GetUniqueKeyColumns(ctx context.Context, dbName string, tableName string) ([]string, error) {
-	rows, err := g.db.QueryContext(ctx, fmt.Sprintf("SHOW INDEX FROM %s.%s WHERE Non_unique=0", dbName, tableName))
+	rows, err := g.db.QueryContext(ctx, fmt.Sprintf(sqlGetIndex, dbName, tableName))
 	if err != nil {
 		return nil, errors.Annotate(err, "query DB error")
 	}

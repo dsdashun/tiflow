@@ -87,47 +87,62 @@ func main() {
 		plog.L().Error(gerr.Error())
 		return
 	}
-	dbConfig := theConfig.DataSources[0]
-	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%d)/", dbConfig.UserName, dbConfig.Password, dbConfig.Host, dbConfig.Port))
-	if err != nil {
-		plog.L().Error("open testing DB failed", zap.Error(err))
-		gerr = err
-		return
-	}
-	if len(dbConfig.Tables) == 0 {
-		gerr = errors.New("no simulating data table provided")
-		plog.L().Error(gerr.Error())
-		return
-	}
-	tblConfigMap := make(map[string]*config.TableConfig)
-	for _, tblConfig := range dbConfig.Tables {
-		tblConfigMap[tblConfig.TableID] = tblConfig
-	}
-
-	theSimulator := core.NewDBSimulator(db, tblConfigMap)
-
-	plog.L().Info("begin to register workloads")
-	for i, workloadConf := range theConfig.Workloads {
-		workloadSimu, err := workload.NewWorkloadSimulatorImpl(tblConfigMap, workloadConf.WorkloadCode)
+	srv := server.NewServer()
+	totalTableConfigMap := make(map[string]map[string]*config.TableConfig)
+	dbSimulatorMap := make(map[string]*core.DBSimulator)
+	for _, dbConfig := range theConfig.DataSources {
+		db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%d)/", dbConfig.UserName, dbConfig.Password, dbConfig.Host, dbConfig.Port))
 		if err != nil {
-			gerr = errors.Annotate(err, "new workload simulator error")
+			plog.L().Error("open testing DB failed", zap.Error(err))
+			gerr = err
+			return
+		}
+		if len(dbConfig.Tables) == 0 {
+			gerr = errors.New("no simulating data table provided")
 			plog.L().Error(gerr.Error())
 			return
 		}
-
+		tblConfigMap := make(map[string]*config.TableConfig)
+		for _, tblConfig := range dbConfig.Tables {
+			tblConfigMap[tblConfig.TableID] = tblConfig
+		}
+		totalTableConfigMap[dbConfig.DataSourceID] = tblConfigMap
+		theSimulator := core.NewDBSimulator(db, tblConfigMap)
+		srv.SetDBSimulator(dbConfig.DataSourceID, theSimulator)
+		dbSimulatorMap[dbConfig.DataSourceID] = theSimulator
+	}
+	plog.L().Info("begin to register workloads")
+	for i, workloadConf := range theConfig.Workloads {
 		plog.L().Info("add the workload into simulator")
-		theSimulator.AddWorkload(fmt.Sprintf("workload%d", i), workloadSimu)
+		for _, dataSourceID := range workloadConf.DataSources {
+			tblConfigMap, ok := totalTableConfigMap[dataSourceID]
+			if !ok {
+				errMsg := "cannot find the table config map"
+				plog.L().Error(errMsg, zap.String("data source ID", dataSourceID))
+				gerr = errors.New(errMsg)
+				return
+			}
+			theSimulator := dbSimulatorMap[dataSourceID]
+			workloadSimu, err := workload.NewWorkloadSimulatorImpl(tblConfigMap, workloadConf.WorkloadCode)
+			if err != nil {
+				gerr = errors.Annotate(err, "new workload simulator error")
+				plog.L().Error(gerr.Error())
+				return
+			}
+			theSimulator.AddWorkload(fmt.Sprintf("workload%d", i), workloadSimu)
+		}
 	}
 	plog.L().Info("registering workloads [DONE]")
 	plog.L().Info("begin to load all related table schemas")
-	if err := theSimulator.LoadAllTableSchemas(context.Background()); err != nil {
-		plog.L().Error("load all table schemas error", zap.Error(err))
-		gerr = err
-		return
+	for _, dbConfig := range theConfig.DataSources {
+		theSimulator := dbSimulatorMap[dbConfig.DataSourceID]
+		if err := theSimulator.LoadAllTableSchemas(context.Background()); err != nil {
+			plog.L().Error("load all table schemas error", zap.Error(err))
+			gerr = err
+			return
+		}
 	}
 	plog.L().Info("loading all related table schemas [DONE]")
-	srv := server.NewServer()
-	srv.SetDBSimulator(dbConfig.DataSourceID, theSimulator)
 	if err := srv.Start(ctx); err != nil {
 		plog.L().Error("start server error", zap.Error(err))
 		gerr = err

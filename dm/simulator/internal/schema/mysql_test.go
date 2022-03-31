@@ -17,11 +17,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"reflect"
+	"regexp"
 	"testing"
 
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/tiflow/dm/pkg/log"
+	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 )
 
 type testMySQLSchemaGenSuite struct {
@@ -35,27 +39,56 @@ func (s *testMySQLSchemaGenSuite) SetupSuite() {
 func (s *testMySQLSchemaGenSuite) TestGetTableDefinitionBasic() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// TODO: change to mock SQL later
-	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%d)/", "root", "guanliyuanmima", "127.0.0.1", 13306))
+	db, mock, err := sqlmock.New()
 	s.Require().Nil(err)
+	tblConfig := config.NewTemplateTableConfigForTest()
+	tabDefRows := sqlmock.NewRows([]string{"COLUMN_NAME", "DATA_TYPE"})
+	for _, colDef := range tblConfig.Columns {
+		tabDefRows.AddRow(colDef.ColumnName, colDef.DataType)
+	}
+	dbName := "games"
+	tblName := "members"
+	mock.ExpectQuery(regexp.QuoteMeta(sqlGetColumnDefinitions)).WithArgs(dbName, tblName).WillReturnRows(tabDefRows)
 	schemaGetter := NewMySQLSchemaGetter(db)
-	colDefs, err := schemaGetter.GetColumnDefinitions(ctx, "games", "members")
+	colDefs, err := schemaGetter.GetColumnDefinitions(ctx, dbName, tblName)
 	s.Require().Nil(err)
-	for _, col := range colDefs {
-		s.T().Logf("column def: %+v\n", col)
+	for i, colDef := range colDefs {
+		s.T().Logf("column def: %+v\n", colDef)
+		s.True(reflect.DeepEqual(tblConfig.Columns[i], colDef))
 	}
 }
 
 func (s *testMySQLSchemaGenSuite) TestGetUniqueKeyColumnsBasic() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// TODO: change to mock SQL later
-	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%d)/", "root", "guanliyuanmima", "127.0.0.1", 13306))
+	db, mock, err := sqlmock.New()
 	s.Require().Nil(err)
+	idxInfoRows := sqlmock.NewRows([]string{
+		"Table",
+		"Non_unique",
+		"Key_name",
+		"Seq_in_index",
+		"Column_name",
+		"Collation",
+		"Cardinality",
+		"Sub_part",
+		"Packed",
+		"Null",
+		"Index_type",
+		"Comment",
+		"Index_comment",
+	})
+	dbName := "games"
+	tblName := "members"
+	idxInfoRows.AddRow(tblName, 0, "PRIMARY", 1, "id", "A", 3571, sql.NullString{}, sql.NullString{}, "", "BTREE", "", "")
+	idxInfoRows.AddRow(tblName, 0, "name_team_id", 2, "team_id", "A", 3531, sql.NullString{}, sql.NullString{}, "YES", "BTREE", "", "")
+	idxInfoRows.AddRow(tblName, 0, "name_team_id", 1, "name", "A", 3463, sql.NullString{}, sql.NullString{}, "YES", "BTREE", "", "")
+	mock.ExpectQuery(regexp.QuoteMeta(fmt.Sprintf(sqlGetIndex, dbName, tblName))).WillReturnRows(idxInfoRows)
 	schemaGetter := NewMySQLSchemaGetter(db)
-	ukCols, err := schemaGetter.GetUniqueKeyColumns(ctx, "games", "members")
+	ukCols, err := schemaGetter.GetUniqueKeyColumns(ctx, dbName, tblName)
 	s.Require().Nil(err)
 	s.T().Logf("uk columns: %+v\n", ukCols)
+	s.True(reflect.DeepEqual(ukCols, []string{"id"}))
 }
 
 func TestMySQLSchemaGenSuite(t *testing.T) {

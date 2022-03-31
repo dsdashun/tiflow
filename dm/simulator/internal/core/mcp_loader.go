@@ -1,3 +1,16 @@
+// Copyright 2022 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package core
 
 import (
@@ -14,16 +27,21 @@ import (
 	"go.uber.org/zap"
 )
 
+// MCPLoaderImpl is the MCP loader implementation to load the MCP directly from the database.
+// It implements the `MCPLoader` interface.
 type MCPLoaderImpl struct {
 	db *sql.DB
 }
 
+// NewMCPLoaderImpl generates an `MCPLoaderImpl` object.
 func NewMCPLoaderImpl(db *sql.DB) *MCPLoaderImpl {
 	return &MCPLoaderImpl{
 		db: db,
 	}
 }
 
+// LoadMCP loads the MCP data according to the table config.
+// It implements the `MCPLoader` interface.
 func (l *MCPLoaderImpl) LoadMCP(ctx context.Context, tblConf *config.TableConfig) (*mcp.ModificationCandidatePool, error) {
 	sqlGen := sqlgen.NewSQLGeneratorImpl(tblConf)
 	sql, colMetas, err := sqlGen.GenLoadUniqueKeySQL()
@@ -92,16 +110,21 @@ func getValueHolderValue(valueHolder interface{}) interface{} {
 	}
 }
 
+// MockMCPLoader is the fake MCP loader implementation used in unit tests.
+// It implements the `MCPLoader` interface.
 type MockMCPLoader struct {
 	recordCount int
 }
 
+// NewMockMCPLoader generates a `MockMCPLoader` object.
 func NewMockMCPLoader(recordCount int) *MockMCPLoader {
 	return &MockMCPLoader{
 		recordCount: recordCount,
 	}
 }
 
+// LoadMCP loads the MCP data according to the table config.
+// It implements the `MCPLoader` interface.
 func (l *MockMCPLoader) LoadMCP(ctx context.Context, tblConf *config.TableConfig) (*mcp.ModificationCandidatePool, error) {
 	theMCP := mcp.NewModificationCandidatePool(8192)
 	colDefMap := config.GenerateColumnDefinitionsMap(tblConf.Columns)
@@ -126,7 +149,9 @@ func (l *MockMCPLoader) LoadMCP(ctx context.Context, tblConf *config.TableConfig
 			}
 		}
 		theUK := mcp.NewUniqueKey(-1, ukValues)
-		theMCP.AddUK(theUK)
+		if err := theMCP.AddUK(theUK); err != nil {
+			return nil, errors.Annotate(err, "add the UK into MCP error")
+		}
 	}
 	return theMCP, nil
 }

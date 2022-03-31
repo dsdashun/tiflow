@@ -39,14 +39,14 @@ type DBSimulator struct {
 	isRunning          atomic.Bool
 	wg                 sync.WaitGroup
 	workloadLock       sync.RWMutex
-	workloadSimulators map[string]workload.WorkloadSimulator
+	workloadSimulators map[string]workload.Simulator
 	ctx                context.Context
 	cancel             func()
-	workerCh           chan workload.WorkloadSimulator
+	workerCh           chan workload.Simulator
 	db                 *sql.DB
 	tblConfigs         map[string]*config.TableConfig
 	mcpMap             map[string]*mcp.ModificationCandidatePool
-	sg                 schema.SchemaGetter
+	sg                 schema.Getter
 	mcpLoader          MCPLoader
 }
 
@@ -55,28 +55,34 @@ func NewDBSimulator(db *sql.DB, tblConfigs map[string]*config.TableConfig) *DBSi
 	return &DBSimulator{
 		db:                 db,
 		tblConfigs:         tblConfigs,
-		workloadSimulators: make(map[string]workload.WorkloadSimulator),
+		workloadSimulators: make(map[string]workload.Simulator),
 		mcpMap:             make(map[string]*mcp.ModificationCandidatePool),
 		sg:                 schema.NewMySQLSchemaGetter(db),
 		mcpLoader:          NewMCPLoaderImpl(db),
 	}
 }
 
+// GetTableConfig gets the table config of a table.
+// It implements the `DBSimulatorInterface` interface.
 func (s *DBSimulator) GetTableConfig(tableName string) *config.TableConfig {
 	return s.tblConfigs[tableName]
 }
 
+// GetDB gets the *sql.DB object for the simulator.
+// It implements the `DBSimulatorInterface` interface.
 func (s *DBSimulator) GetDB() *sql.DB {
 	return s.db
 }
 
+// GetContext gets the context of this simulator.
+// It implements the `DBSimulatorInterface` interface.
 func (s *DBSimulator) GetContext() context.Context {
 	return s.ctx
 }
 
 // workerFn is the main loop for a simulation worker.
 // It will continuously receive a workload and simulate a transaction for it.
-func (s *DBSimulator) workerFn(ctx context.Context, workloadCh <-chan workload.WorkloadSimulator) {
+func (s *DBSimulator) workerFn(ctx context.Context, workloadCh <-chan workload.Simulator) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -94,7 +100,7 @@ func (s *DBSimulator) workerFn(ctx context.Context, workloadCh <-chan workload.W
 }
 
 // AddWorkload adds a workload simulator to the DB simulator.
-func (s *DBSimulator) AddWorkload(workloadName string, ts workload.WorkloadSimulator) {
+func (s *DBSimulator) AddWorkload(workloadName string, ts workload.Simulator) {
 	s.workloadLock.Lock()
 	defer s.workloadLock.Unlock()
 	s.workloadSimulators[workloadName] = ts
@@ -194,6 +200,7 @@ func (s *DBSimulator) LoadMCP(ctx context.Context) error {
 
 // StartSimulation starts simulation of this DB simulator.
 // It will spawn several worker goroutines for handling workloads in parallel.
+// It implements the `DBSimulatorInterface` interface.
 func (s *DBSimulator) StartSimulation(ctx context.Context) error {
 	if s.isRunning.Load() {
 		plog.L().Info("the DB simulator has already been started")
@@ -205,7 +212,7 @@ func (s *DBSimulator) StartSimulation(ctx context.Context) error {
 		s.ctx, s.cancel = context.WithCancel(ctx)
 		workerCount := 8 // currently, it is hard-coded.  TODO: make it a input parameter.
 		s.wg.Add(workerCount)
-		s.workerCh = make(chan workload.WorkloadSimulator, workerCount)
+		s.workerCh = make(chan workload.Simulator, workerCount)
 		for i := 0; i < workerCount; i++ {
 			go func() {
 				defer s.wg.Done()
@@ -251,6 +258,7 @@ func (s *DBSimulator) StartSimulation(ctx context.Context) error {
 }
 
 // StopSimulation stops simulation of this DB simulator.
+// It implements the `DBSimulatorInterface` interface.
 func (s *DBSimulator) StopSimulation() error {
 	if !s.isRunning.Load() {
 		plog.L().Info("the server has already been closed")
@@ -272,14 +280,14 @@ func (s *DBSimulator) StopSimulation() error {
 // DoSimulation is the main loop for this DB simulator.
 // It will randomly choose a workload simulator and assign to a execution worker.
 func (s *DBSimulator) DoSimulation(ctx context.Context) {
-	var theWorkload workload.WorkloadSimulator
+	var theWorkload workload.Simulator
 	for {
 		select {
 		case <-ctx.Done():
 			plog.L().Info("context expired, simulation terminated")
 			return
 		default:
-			theWorkload = func() workload.WorkloadSimulator {
+			theWorkload = func() workload.Simulator {
 				s.workloadLock.RLock()
 				defer s.workloadLock.RUnlock()
 				weightMap := make(map[string]int)
@@ -314,6 +322,7 @@ func randomChooseKeyByWeights(weights map[string]int) string {
 	return expandedKeys[idx]
 }
 
+// NewTableConfigFromDB generates a new table config from the database.
 func (s *DBSimulator) NewTableConfigFromDB(ctx context.Context, tableID string, databaseName string, tableName string) (*config.TableConfig, error) {
 	theLogger := plog.L().With(
 		zap.String("table_id", tableID),
@@ -345,6 +354,8 @@ func (s *DBSimulator) NewTableConfigFromDB(ctx context.Context, tableID string, 
 	}, nil
 }
 
+// RefreshTableSchema refreshes the table schema of a table in the DB simulator.
+// It will not only updates the table config, but also refresh the MCP.
 func (s *DBSimulator) RefreshTableSchema(ctx context.Context, tableID string) error {
 	currentTblConfig, ok := s.tblConfigs[tableID]
 	if !ok {
@@ -379,7 +390,9 @@ func (s *DBSimulator) RefreshTableSchema(ctx context.Context, tableID string) er
 	}
 	s.tblConfigs[tableID] = newTableConfig
 	for _, ws := range s.workloadSimulators {
-		ws.SetTableConfig(tableID, newTableConfig)
+		if setErr := ws.SetTableConfig(tableID, newTableConfig); setErr != nil {
+			return errors.Annotate(setErr, "set table config error")
+		}
 	}
 	newMCP, err := s.mcpLoader.LoadMCP(ctx, newTableConfig)
 	if err != nil {
@@ -389,6 +402,7 @@ func (s *DBSimulator) RefreshTableSchema(ctx context.Context, tableID string) er
 	return nil
 }
 
+// RefreshTableSchema refreshes all the table schemas in the DB simulator.
 func (s *DBSimulator) RefreshAllTableSchemas(ctx context.Context) error {
 	allInvolvedTblConfigs, err := s.getAllInvolvedTableConfigs()
 	if err != nil {
@@ -404,6 +418,9 @@ func (s *DBSimulator) RefreshAllTableSchemas(ctx context.Context) error {
 	return nil
 }
 
+// RefreshTableSchema loads all the table schemas in the DB simulator.
+// It will only updates the table config, not refreshing the MCP.
+// It is used at the start of the DB simulator.
 func (s *DBSimulator) LoadAllTableSchemas(ctx context.Context) error {
 	allInvolvedTblConfigs, err := s.getAllInvolvedTableConfigs()
 	if err != nil {
@@ -425,12 +442,16 @@ func (s *DBSimulator) LoadAllTableSchemas(ctx context.Context) error {
 		}
 		s.tblConfigs[tableID] = newTableConfig
 		for _, ws := range s.workloadSimulators {
-			ws.SetTableConfig(tableID, newTableConfig)
+			if err := ws.SetTableConfig(tableID, newTableConfig); err != nil {
+				return errors.Annotate(err, "set table config error")
+			}
 		}
 	}
 	return nil
 }
 
+// Prepare does all the preparation works before the simulator starts.
+// It implements the `DBSimulatorInterface` interface.
 func (s *DBSimulator) Prepare(ctx context.Context) error {
 	plog.L().Info("begin to load table schemas")
 	if err := s.LoadAllTableSchemas(ctx); err != nil {

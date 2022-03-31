@@ -28,6 +28,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// Server is the simulator service server core object.
 type Server struct {
 	sync.RWMutex
 	simulators map[string]core.DBSimulatorInterface
@@ -38,18 +39,21 @@ type Server struct {
 	httpSrv    *http.Server
 }
 
+// NewServer creates a new server.
 func NewServer() *Server {
 	return &Server{
 		simulators: make(map[string]core.DBSimulatorInterface),
 	}
 }
 
+// SetDBSimulator associates the DBSimulator with the data source ID.
 func (s *Server) SetDBSimulator(dbName string, simu core.DBSimulatorInterface) {
 	s.Lock()
 	defer s.Unlock()
 	s.simulators[dbName] = simu
 }
 
+// GetDBSimulator gets the DBSimulator according to the data source ID.
 func (s *Server) GetDBSimulator(dbName string) core.DBSimulatorInterface {
 	s.RLock()
 	defer s.RUnlock()
@@ -60,6 +64,7 @@ func (s *Server) GetDBSimulator(dbName string) core.DBSimulatorInterface {
 	return simu
 }
 
+// Start starts the server.
 func (s *Server) Start(ctx context.Context) error {
 	if s.isRunning.Load() {
 		// has already started
@@ -112,6 +117,7 @@ func (s *Server) Start(ctx context.Context) error {
 	return gerr
 }
 
+// Stop stops the server.
 func (s *Server) Stop() error {
 	if !s.isRunning.Load() {
 		// has already stopped

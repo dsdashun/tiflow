@@ -1,3 +1,16 @@
+// Copyright 2022 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package workload
 
 import (
@@ -16,7 +29,7 @@ import (
 )
 
 func packToString(cfgMap map[string]*config.TableConfig) (string, error) {
-	var tblCfgMd5s [][2]string
+	tblCfgMd5s := make([][2]string, 0)
 	for tblID, tblConfig := range cfgMap {
 		clonedCfg := tblConfig.SortedClone()
 		md5Hash := md5.New()
@@ -30,13 +43,15 @@ func packToString(cfgMap map[string]*config.TableConfig) (string, error) {
 	sort.Slice(tblCfgMd5s, func(i, j int) bool {
 		return tblCfgMd5s[i][0] < tblCfgMd5s[j][0]
 	})
-	var md5PairStrs []string
+	md5PairStrs := make([]string, 0)
 	for _, md5Pair := range tblCfgMd5s {
 		md5PairStrs = append(md5PairStrs, fmt.Sprintf("%s=%s", md5Pair[0], md5Pair[1]))
 	}
 	return strings.Join(md5PairStrs, ","), nil
 }
 
+// MockWorkload defines a fake workload for unit tests.
+// It implements the `Simulator` interface.
 type MockWorkload struct {
 	sync.RWMutex
 	involvedTables   map[string]struct{}
@@ -46,6 +61,7 @@ type MockWorkload struct {
 	currentSchemaStr string
 }
 
+// NewMockWorkload creates a new `MockWorkload`.
 func NewMockWorkload(tblCfgMap map[string]*config.TableConfig) (*MockWorkload, error) {
 	involvedTables := make(map[string]struct{})
 	for tableID := range tblCfgMap {
@@ -66,10 +82,14 @@ func NewMockWorkload(tblCfgMap map[string]*config.TableConfig) (*MockWorkload, e
 	}, nil
 }
 
+// GetCurrentSchemaSignature gets the schema signature for the mock workload.
+// It is used to do fast comparations on unit tests.
 func (w *MockWorkload) GetCurrentSchemaSignature() string {
 	return w.currentSchemaStr
 }
 
+// TotalExecuted gets total executed queries on the specific table schema.
+// It is used in the unit tests to verify the execution stats after the schema has changed.
 func (w *MockWorkload) TotalExecuted(schemaSig string) uint64 {
 	w.RLock()
 	defer w.RUnlock()
@@ -80,6 +100,8 @@ func (w *MockWorkload) TotalExecuted(schemaSig string) uint64 {
 	return auint.Load()
 }
 
+// SimulateTrx simulates a transaction from the workload simulator.
+// It implements the `Simulator` interface.
 func (w *MockWorkload) SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*mcp.ModificationCandidatePool) error {
 	w.RLock()
 	defer w.RUnlock()
@@ -90,14 +112,18 @@ func (w *MockWorkload) SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[s
 	return nil
 }
 
+// GetInvolvedTables collects all the involved table names in the workload.
+// It implements the `Simulator` interface.
 func (w *MockWorkload) GetInvolvedTables() []string {
-	var involvedTblStrs []string
+	involvedTblStrs := make([]string, 0)
 	for tblID := range w.involvedTables {
 		involvedTblStrs = append(involvedTblStrs, tblID)
 	}
 	return involvedTblStrs
 }
 
+// SetTableConfig sets the table config of a table ID.
+// It implements the `Simulator` interface.
 func (w *MockWorkload) SetTableConfig(tableID string, tblConfig *config.TableConfig) error {
 	if !w.DoesInvolveTable(tableID) {
 		return nil
@@ -116,18 +142,26 @@ func (w *MockWorkload) SetTableConfig(tableID string, tblConfig *config.TableCon
 	return nil
 }
 
+// Enable enables this workload.
+// It implements the `Simulator` interface.
 func (w *MockWorkload) Enable() {
 	w.isEnabled.Store(true)
 }
 
+// Disable disables this workload.
+// It implements the `Simulator` interface.
 func (w *MockWorkload) Disable() {
 	w.isEnabled.Store(false)
 }
 
+// IsEnabled checks whether this workload is enabled or not.
+// It implements the `Simulator` interface.
 func (w *MockWorkload) IsEnabled() bool {
 	return w.isEnabled.Load()
 }
 
+// DoesInvolveTable checks whether this workload involves the specified table.
+// It implements the `Simulator` interface.
 func (w *MockWorkload) DoesInvolveTable(tableID string) bool {
 	_, ok := w.involvedTables[tableID]
 	return ok

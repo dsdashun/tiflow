@@ -22,8 +22,8 @@ import (
 	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
 )
 
-// WorkloadSimulator defines all the basic operations for simulating a transaction of a workload.
-type WorkloadSimulator interface {
+// Simulator defines all the basic operations for simulating a transaction of a workload.
+type Simulator interface {
 	// SimulateTrx simulates a transaction from the workload simulator.
 	SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*mcp.ModificationCandidatePool) error
 

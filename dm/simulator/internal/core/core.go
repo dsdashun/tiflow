@@ -23,12 +23,14 @@ import (
 	"github.com/pingcap/tiflow/dm/simulator/internal/mcp"
 )
 
+// MCPLoader defines the operations for loading UK data into the modification candidate pool.
 type MCPLoader interface {
+	// LoadMCP loads the MCP data according to the table config.
 	LoadMCP(ctx context.Context, tblConf *config.TableConfig) (*mcp.ModificationCandidatePool, error)
 }
 
 // Simulator defines all the basic operations of a simulator.
-// In the future, each method will be mapped to an API
+// In the future, each method will be mapped to an API.
 type DBSimulatorInterface interface {
 	// StartSimulation starts the simulation.
 	StartSimulation(ctx context.Context) error
@@ -36,7 +38,7 @@ type DBSimulatorInterface interface {
 	// StopSimulation stops the simulation.
 	StopSimulation() error
 
-	// GetTableConfig gets the table config of a table
+	// GetTableConfig gets the table config of a table.
 	GetTableConfig(tableName string) *config.TableConfig
 
 	// Prepare prepares for starting the simulation.
@@ -45,6 +47,6 @@ type DBSimulatorInterface interface {
 	// GetDB gets the *sql.DB object for the simulator.
 	GetDB() *sql.DB
 
-	// GetContext gets the context of this simulator
+	// GetContext gets the context of this simulator.
 	GetContext() context.Context
 }

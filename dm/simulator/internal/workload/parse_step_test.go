@@ -17,7 +17,6 @@ import (
 	"testing"
 
 	"github.com/antlr/antlr4/runtime/Go/antlr"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/tiflow/dm/pkg/log"
@@ -31,40 +30,40 @@ type testParseStepSuite struct {
 }
 
 func (s *testParseStepSuite) SetupSuite() {
-	assert.Nil(s.T(), log.InitLogger(&log.Config{}))
+	s.Require().Nil(log.InitLogger(&log.Config{}))
 	s.tableConfigs = map[string]*config.TableConfig{
-		"games.members": &config.TableConfig{
+		"games.members": {
 			DatabaseName: "games",
 			TableName:    "members",
 			Columns: []*config.ColumnDefinition{
-				&config.ColumnDefinition{
+				{
 					ColumnName: "id",
 					DataType:   "int",
 				},
-				&config.ColumnDefinition{
+				{
 					ColumnName: "name",
 					DataType:   "varchar",
 				},
-				&config.ColumnDefinition{
+				{
 					ColumnName: "age",
 					DataType:   "int",
 				},
-				&config.ColumnDefinition{
+				{
 					ColumnName: "team_id",
 					DataType:   "int",
 				},
 			},
 			UniqueKeyColumnNames: []string{"id"},
 		},
-		"tbl2": &config.TableConfig{
+		"tbl2": {
 			DatabaseName: "games",
 			TableName:    "dummy",
 			Columns: []*config.ColumnDefinition{
-				&config.ColumnDefinition{
+				{
 					ColumnName: "id",
 					DataType:   "int",
 				},
-				&config.ColumnDefinition{
+				{
 					ColumnName: "val",
 					DataType:   "varchar",
 				},
@@ -98,7 +97,7 @@ REPEAT 3 (
 	tree := p.WorkloadSteps()
 	sl := NewParseStepsListener(s.tableConfigs)
 	antlr.ParseTreeWalkerDefault.Walk(sl, tree)
-	assert.Nil(s.T(), el.Err())
+	s.Require().Nil(el.Err())
 	for _, step := range sl.totalSteps {
 		s.T().Logf("%v\n", step)
 	}
@@ -122,7 +121,7 @@ REPEAT 2 (
 	tree := p.WorkloadSteps()
 	sl := NewParseStepsListener(s.tableConfigs)
 	antlr.ParseTreeWalkerDefault.Walk(sl, tree)
-	assert.NotNil(s.T(), el.Err(), "should have syntax error")
+	s.Require().NotNil(el.Err(), "should have syntax error")
 	s.T().Logf("Got syntax error: %v\n", el.Err())
 }
 

@@ -66,7 +66,7 @@ type testParserSuite struct {
 }
 
 func (s *testParserSuite) SetupSuite() {
-	assert.Nil(s.T(), log.InitLogger(&log.Config{}))
+	s.Require().Nil(log.InitLogger(&log.Config{}))
 }
 
 func (s *testParserSuite) TestBasic() {

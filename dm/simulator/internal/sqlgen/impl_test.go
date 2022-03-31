@@ -43,19 +43,19 @@ func (s *testSQLGenImplSuite) SetupSuite() {
 		DatabaseName: "games",
 		TableName:    "members",
 		Columns: []*config.ColumnDefinition{
-			&config.ColumnDefinition{
+			{
 				ColumnName: "id",
 				DataType:   "int",
 			},
-			&config.ColumnDefinition{
+			{
 				ColumnName: "name",
 				DataType:   "varchar",
 			},
-			&config.ColumnDefinition{
+			{
 				ColumnName: "age",
 				DataType:   "int",
 			},
-			&config.ColumnDefinition{
+			{
 				ColumnName: "team_id",
 				DataType:   "int",
 			},

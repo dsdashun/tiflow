@@ -19,7 +19,6 @@ import (
 	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/tiflow/dm/pkg/log"
@@ -101,7 +100,7 @@ func (s *testDBSimulatorSuite) TestChooseWorkload() {
 	for i := 0; i < 100; i++ {
 		workloadName := randomChooseKeyByWeights(weightMap)
 		theWorkload := simu.workloadSimulators[workloadName]
-		assert.Nil(s.T(), theWorkload.SimulateTrx(ctx, nil, nil))
+		s.Require().Nil(theWorkload.SimulateTrx(ctx, nil, nil))
 	}
 	w1CurrentExecuted := w1.TotalExecuted(w1.GetCurrentSchemaSignature())
 	w2CurrentExecuted := w2.TotalExecuted(w2.GetCurrentSchemaSignature())
@@ -135,9 +134,9 @@ func (s *testDBSimulatorSuite) TestChooseWorkload() {
 		}
 		s.Nil(theWorkload.SimulateTrx(ctx, nil, nil))
 	}
-	assert.Greater(s.T(), w1.TotalExecuted(w1.GetCurrentSchemaSignature()), w1CurrentExecuted, "workload 01 should at least execute once")
-	assert.Greater(s.T(), w2.TotalExecuted(w2.GetCurrentSchemaSignature()), w2CurrentExecuted, "workload 02 should at least execute once")
-	assert.Equal(s.T(), w3.TotalExecuted(w3.GetCurrentSchemaSignature()), w3CurrentExecuted, "workload 03 should keep the executed count")
+	s.Require().Greater(w1.TotalExecuted(w1.GetCurrentSchemaSignature()), w1CurrentExecuted, "workload 01 should at least execute once")
+	s.Require().Greater(w2.TotalExecuted(w2.GetCurrentSchemaSignature()), w2CurrentExecuted, "workload 02 should at least execute once")
+	s.Require().Equal(w3.TotalExecuted(w3.GetCurrentSchemaSignature()), w3CurrentExecuted, "workload 03 should keep the executed count")
 }
 
 func (s *testDBSimulatorSuite) TestStartStopSimulation() {

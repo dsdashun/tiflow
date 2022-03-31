@@ -20,8 +20,8 @@ import (
 	"github.com/pingcap/tiflow/dm/simulator/internal/config"
 )
 
-// SchemaGetter defines the operations on getting the schema of a table.
-type SchemaGetter interface {
+// Getter defines the operations on getting the schema of a table.
+type Getter interface {
 	// GetColumnDefinitions gets the column definitions of a table.
 	GetColumnDefinitions(ctx context.Context, dbName string, tableName string) ([]*config.ColumnDefinition, error)
 	// GetUniqueKeyColumns gets the columns of a unique key in a table.

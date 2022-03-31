@@ -22,7 +22,6 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
@@ -38,7 +37,7 @@ type testWorkloadSimulatorSuite struct {
 }
 
 func (s *testWorkloadSimulatorSuite) SetupSuite() {
-	assert.Nil(s.T(), log.InitLogger(&log.Config{}))
+	s.Require().Nil(log.InitLogger(&log.Config{}))
 	s.mcpMap = make(map[string]*mcp.ModificationCandidatePool)
 }
 
@@ -79,7 +78,7 @@ func (s *testWorkloadSimulatorSuite) SetupTest() {
 	theMCP := mcp.NewModificationCandidatePool(8192)
 	recordCount := 128
 	for i := 0; i < recordCount; i++ {
-		assert.Nil(s.T(),
+		s.Require().Nil(
 			theMCP.AddUK(mcp.NewUniqueKey(-1, map[string]interface{}{
 				"id": rand.Int(),
 			})),
@@ -108,17 +107,16 @@ func (s *testWorkloadSimulatorSuite) TestBasic() {
 		},
 		"RANDOM-DML members;",
 	)
-	assert.Nil(s.T(), err)
+	s.Require().Nil(err)
 	for i := 0; i < 100; i++ {
 		mockSingleDMLTrx(mock)
-		err = theSimulator.SimulateTrx(ctx, db, s.mcpMap)
-		assert.Nil(s.T(), err)
+		s.Require().Nil(theSimulator.SimulateTrx(ctx, db, s.mcpMap))
 	}
 	s.T().Logf("total executed trx: %d\n", theSimulator.totalExecutedTrx)
 }
 
 func mockInsertStep(mock sqlmock.Sqlmock, tblConfig *config.TableConfig) {
-	var colNames []string
+	colNames := make([]string, 0)
 	for _, colDef := range tblConfig.Columns {
 		colNames = append(colNames, fmt.Sprintf("`%s`", colDef.ColumnName))
 	}
@@ -136,8 +134,8 @@ func mockInsertStep(mock sqlmock.Sqlmock, tblConfig *config.TableConfig) {
 
 func mockUpdateStep(mock sqlmock.Sqlmock, tblConfig *config.TableConfig) {
 	var (
-		nonUKColNames    []string
-		quotedUKColNames []string
+		nonUKColNames    = make([]string, 0)
+		quotedUKColNames = make([]string, 0)
 	)
 	ukNameMap := make(map[string]struct{})
 	for _, ukColName := range tblConfig.UniqueKeyColumnNames {
@@ -167,9 +165,7 @@ func mockUpdateStep(mock sqlmock.Sqlmock, tblConfig *config.TableConfig) {
 }
 
 func mockDeleteStep(mock sqlmock.Sqlmock, tblConfig *config.TableConfig) {
-	var (
-		quotedUKColNames []string
-	)
+	quotedUKColNames := make([]string, 0)
 	for _, ukColName := range tblConfig.UniqueKeyColumnNames {
 		quotedUKColNames = append(quotedUKColNames, fmt.Sprintf("`%s`", ukColName))
 	}
@@ -210,7 +206,7 @@ func (s *testWorkloadSimulatorSuite) TestSchemaChange() {
 		DELETE members02;
 		`,
 	)
-	assert.Nil(s.T(), err)
+	s.Require().Nil(err)
 	mcp01, err := newTestMCP(128, tblConfig01)
 	s.Require().Nil(err)
 	mcp02, err := newTestMCP(128, tblConfig02)
@@ -241,7 +237,7 @@ func (s *testWorkloadSimulatorSuite) TestSchemaChange() {
 		}),
 		UniqueKeyColumnNames: []string{"name", "team_id"},
 	}
-	theSimulator.SetTableConfig("members02", tblConfig02New)
+	s.Require().Nil(theSimulator.SetTableConfig("members02", tblConfig02New))
 	mcp02New, err := newTestMCP(128, tblConfig02New)
 	s.Require().Nil(err)
 	theMCPMap[tblConfig02New.TableID] = mcp02New
@@ -301,7 +297,7 @@ func (s *testWorkloadSimulatorSuite) TestParallelSimulation() {
 	}
 	for i := 0; i < workerCount; i++ {
 		err := <-resultCh
-		assert.Nil(s.T(), err)
+		s.Require().Nil(err)
 	}
 }
 

@@ -83,18 +83,26 @@ func NewWorkloadSimulatorImpl(
 	}, nil
 }
 
+// Enable enables this workload.
+// It implements the `Simulator` interface.
 func (s *workloadSimulatorImpl) Enable() {
 	s.isEnabled.Store(true)
 }
 
+// Disable disables this workload.
+// It implements the `Simulator` interface.
 func (s *workloadSimulatorImpl) Disable() {
 	s.isEnabled.Store(false)
 }
 
+// IsEnabled checks whether this workload is enabled or not.
+// It implements the `Simulator` interface.
 func (s *workloadSimulatorImpl) IsEnabled() bool {
 	return s.isEnabled.Load()
 }
 
+// DoesInvolveTable checks whether this workload involves the specified table.
+// It implements the `Simulator` interface.
 func (s *workloadSimulatorImpl) DoesInvolveTable(tableID string) bool {
 	for _, step := range s.steps {
 		if step.GetTableName() == tableID {
@@ -104,6 +112,8 @@ func (s *workloadSimulatorImpl) DoesInvolveTable(tableID string) bool {
 	return false
 }
 
+// SetTableConfig sets the table config of a table ID.
+// It implements the `Simulator` interface.
 func (s *workloadSimulatorImpl) SetTableConfig(tableID string, tblConfig *config.TableConfig) error {
 	isTableIDUsed := false
 	for _, step := range s.steps {
@@ -121,7 +131,7 @@ func (s *workloadSimulatorImpl) SetTableConfig(tableID string, tblConfig *config
 }
 
 // SimulateTrx simulates a transaction for this workload.
-// It implements the WorkloadSimulator interface.
+// It implements the `Simulator` interface.
 func (s *workloadSimulatorImpl) SimulateTrx(ctx context.Context, db *sql.DB, mcpMap map[string]*mcp.ModificationCandidatePool) error {
 	if !s.IsEnabled() {
 		errMsg := "this workload is disabled"
@@ -178,7 +188,7 @@ func (s *workloadSimulatorImpl) SimulateTrx(ctx context.Context, db *sql.DB, mcp
 }
 
 // GetInvolvedTables gathers all the involved tables for this workload.
-// It implements the WorkloadSimulator interface.
+// It implements the `Simulator` interface.
 func (s *workloadSimulatorImpl) GetInvolvedTables() []string {
 	involvedTbls := []string{}
 	for tblName := range s.tblConfigs {

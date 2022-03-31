@@ -1,3 +1,16 @@
+// Copyright 2022 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package server
 
 import (
@@ -13,16 +26,19 @@ import (
 	"go.uber.org/zap"
 )
 
+// APIServer implements all kinds of APIs.
 type APIServer struct {
 	parentServer *Server
 }
 
+// NewAPIServer creates a new API server.
 func NewAPIServer(parentServer *Server) *APIServer {
 	return &APIServer{
 		parentServer: parentServer,
 	}
 }
 
+// ApplyDDL implements the apply DDL API.
 func (s *APIServer) ApplyDDL(c *gin.Context, sourceName string, tableID string) {
 	var gerr error
 	response := &openapi.BasicResponse{}
@@ -52,7 +68,10 @@ func (s *APIServer) ApplyDDL(c *gin.Context, sourceName string, tableID string) 
 	}
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("ALTER TABLE `%s`.`%s` ", tblConfig.DatabaseName, tblConfig.TableName))
-	io.Copy(&sb, c.Request.Body)
+	if _, err := io.Copy(&sb, c.Request.Body); err != nil {
+		gerr = errors.Annotate(err, "copy request body into a string builder error")
+		return
+	}
 	db := simu.GetDB()
 	if db == nil {
 		errMsg := "cannot get the DB handle"

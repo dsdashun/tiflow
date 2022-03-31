@@ -20,7 +20,6 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/tiflow/dm/pkg/log"
@@ -36,24 +35,24 @@ type testWorkloadStepSuite struct {
 }
 
 func (s *testWorkloadStepSuite) SetupSuite() {
-	assert.Nil(s.T(), log.InitLogger(&log.Config{}))
+	s.Require().Nil(log.InitLogger(&log.Config{}))
 	s.tableConfig = &config.TableConfig{
 		DatabaseName: "games",
 		TableName:    "members",
 		Columns: []*config.ColumnDefinition{
-			&config.ColumnDefinition{
+			{
 				ColumnName: "id",
 				DataType:   "int",
 			},
-			&config.ColumnDefinition{
+			{
 				ColumnName: "name",
 				DataType:   "varchar",
 			},
-			&config.ColumnDefinition{
+			{
 				ColumnName: "age",
 				DataType:   "int",
 			},
-			&config.ColumnDefinition{
+			{
 				ColumnName: "team_id",
 				DataType:   "int",
 			},
@@ -62,7 +61,7 @@ func (s *testWorkloadStepSuite) SetupSuite() {
 	}
 	s.theMCP = mcp.NewModificationCandidatePool(8192)
 	for i := 0; i < 100; i++ {
-		assert.Nil(s.T(),
+		s.Require().Nil(
 			s.theMCP.AddUK(mcp.NewUniqueKey(-1, map[string]interface{}{
 				"id": rand.Int(),
 			})),
@@ -94,7 +93,7 @@ func (s *testWorkloadStepSuite) TestBasic() {
 
 	mock.ExpectBegin()
 	tx, err := db.BeginTx(ctx, nil)
-	assert.Nil(s.T(), err)
+	s.Require().Nil(err)
 
 	sctx := &DMLWorkloadStepContext{
 		tx:       tx,
@@ -104,24 +103,19 @@ func (s *testWorkloadStepSuite) TestBasic() {
 		addedUKs: make(map[string]map[*mcp.UniqueKey]struct{}),
 	}
 	mock.ExpectExec("^INSERT (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
-	err = theInsertStep.Execute(sctx)
-	assert.Nil(s.T(), err)
+	s.Require().Nil(theInsertStep.Execute(sctx))
 
 	mock.ExpectExec("^UPDATE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
-	err = theUpdateStep.Execute(sctx)
-	assert.Nil(s.T(), err)
+	s.Require().Nil(theUpdateStep.Execute(sctx))
 
 	mock.ExpectExec("^DELETE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
-	err = theDeleteStep.Execute(sctx)
-	assert.Nil(s.T(), err)
+	s.Require().Nil(theDeleteStep.Execute(sctx))
 
 	mock.ExpectExec("^(INSERT|UPDATE|DELETE) (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
-	err = theRandomStep.Execute(sctx)
-	assert.Nil(s.T(), err)
+	s.Require().Nil(theRandomStep.Execute(sctx))
 
 	mock.ExpectCommit()
-	err = tx.Commit()
-	assert.Nil(s.T(), err)
+	s.Require().Nil(tx.Commit())
 }
 
 func (s *testWorkloadStepSuite) TestAssignmentReference() {
@@ -140,7 +134,7 @@ func (s *testWorkloadStepSuite) TestAssignmentReference() {
 
 	mock.ExpectBegin()
 	tx, err := db.BeginTx(ctx, nil)
-	assert.Nil(s.T(), err)
+	s.Require().Nil(err)
 
 	sctx := &DMLWorkloadStepContext{
 		tx:       tx,
@@ -150,39 +144,33 @@ func (s *testWorkloadStepSuite) TestAssignmentReference() {
 		addedUKs: make(map[string]map[*mcp.UniqueKey]struct{}),
 	}
 	mock.ExpectExec("^INSERT (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
-	err = theInsertStep.Execute(sctx)
-	assert.Nil(s.T(), err)
-	assert.Equal(s.T(), 0, len(sctx.rowRefs), "there should be no assigned rows")
+	s.Require().Nil(theInsertStep.Execute(sctx))
+	s.Require().Equal(0, len(sctx.rowRefs), "there should be no assigned rows")
 
 	assignedRowID := "@abc01"
 	theInsertStep.assignedRowID = assignedRowID
 
 	mock.ExpectExec("^INSERT (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
-	err = theInsertStep.Execute(sctx)
-	assert.Nil(s.T(), err)
+	s.Require().Nil(theInsertStep.Execute(sctx))
 	assignedUK, ok := sctx.rowRefs[assignedRowID]
-	assert.Equalf(s.T(), true, ok, "%s should be assigned", assignedRowID)
+	s.Require().Truef(ok, "%s should be assigned", assignedRowID)
 	s.T().Logf("%s assigned with the UK: %v\n", assignedRowID, assignedUK)
-	//assert.NotEqual(s.T(), -1, assignedUK.GetRowID(), "the new UK should have a valid row ID")
 
 	// normal update
 	theUpdateStep := &UpdateStep{
 		sqlGen: sqlGen,
 	}
 	mock.ExpectExec("^UPDATE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
-	err = theUpdateStep.Execute(sctx)
-	assert.Nil(s.T(), err)
+	s.Require().Nil(theUpdateStep.Execute(sctx))
 
 	// update use the assigned UK
 	theUpdateStep.inputRowID = assignedRowID
 	mock.ExpectExec("^UPDATE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
-	err = theUpdateStep.Execute(sctx)
-	assert.Nil(s.T(), err)
+	s.Require().Nil(theUpdateStep.Execute(sctx))
 
 	// update use an non-existing UK
 	theUpdateStep.inputRowID = "@NOT_EXISTING"
-	err = theUpdateStep.Execute(sctx)
-	assert.NotNil(s.T(), err, "update a non-existing row should have error")
+	s.Require().NotNil(theUpdateStep.Execute(sctx), "update a non-existing row should have error")
 	s.T().Logf("updating a non-existing rowID get the following error: %v\n", err)
 
 	// double reference the same UK
@@ -190,12 +178,11 @@ func (s *testWorkloadStepSuite) TestAssignmentReference() {
 	theUpdateStep.inputRowID = assignedRowID
 	theUpdateStep.assignmentRowID = assignedRowID2
 	mock.ExpectExec("^UPDATE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
-	err = theUpdateStep.Execute(sctx)
-	assert.Nil(s.T(), err)
+	s.Require().Nil(theUpdateStep.Execute(sctx))
 	assignedUK2, ok := sctx.rowRefs[assignedRowID2]
-	assert.Equalf(s.T(), true, ok, "%s should be assigned", assignedRowID2)
+	s.Require().Truef(ok, "%s should be assigned", assignedRowID2)
 	s.T().Logf("%s assigned with the UK: %v\n", assignedRowID2, assignedUK2)
-	assert.Equal(s.T(), assignedUK, assignedUK2, "the two assignment should be the same")
+	s.Require().Equal(assignedUK, assignedUK2, "the two assignment should be the same")
 
 	// delete double-refferred row
 	theDeleteStep := &DeleteStep{
@@ -203,45 +190,39 @@ func (s *testWorkloadStepSuite) TestAssignmentReference() {
 		inputRowID: assignedRowID2,
 	}
 	mock.ExpectExec("^DELETE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
-	err = theDeleteStep.Execute(sctx)
-	assert.Nil(s.T(), err)
+	s.Require().Nil(theDeleteStep.Execute(sctx))
 	_, ok = sctx.rowRefs[assignedRowID2]
-	assert.Equalf(s.T(), false, ok, "%s should not be assigned", assignedRowID2)
+	s.Require().Falsef(ok, "%s should not be assigned", assignedRowID2)
 	s.T().Logf("after delete %s: %v\n", assignedRowID2, assignedUK)
 
 	// assign another row to the row ID
 	theUpdateStep.assignmentRowID = assignedRowID
 	theUpdateStep.inputRowID = ""
 	mock.ExpectExec("^UPDATE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
-	err = theUpdateStep.Execute(sctx)
-	assert.Nil(s.T(), err)
+	s.Require().Nil(theUpdateStep.Execute(sctx))
 	anotherAssignedUK, ok := sctx.rowRefs[assignedRowID]
-	assert.Equalf(s.T(), true, ok, "%s should be assigned", assignedRowID)
+	s.Require().Truef(ok, "%s should be assigned", assignedRowID)
 	s.T().Logf("%s assigned with the UK: %v\n", assignedRowID, anotherAssignedUK)
 
 	// delete non-existing row-ref
 	theDeleteStep.inputRowID = "@NOT_EXISTING"
-	err = theDeleteStep.Execute(sctx)
-	assert.NotNil(s.T(), err, "delete a non-existing row should have error")
+	s.Require().NotNil(theDeleteStep.Execute(sctx), "delete a non-existing row should have error")
 	s.T().Logf("deleting a non-existing rowID get the following error: %v\n", err)
 
 	// delete existing row-ref
 	theDeleteStep.inputRowID = assignedRowID
 	mock.ExpectExec("^DELETE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
-	err = theDeleteStep.Execute(sctx)
-	assert.Nil(s.T(), err)
+	s.Require().Nil(theDeleteStep.Execute(sctx))
 	_, ok = sctx.rowRefs[assignedRowID]
-	assert.Equalf(s.T(), false, ok, "%s should be unassigned", assignedRowID)
+	s.Require().Falsef(ok, "%s should be unassigned", assignedRowID)
 
 	// normal deletion
 	theDeleteStep.inputRowID = ""
 	mock.ExpectExec("^DELETE (.+)").WillReturnResult(sqlmock.NewResult(0, 1))
-	err = theDeleteStep.Execute(sctx)
-	assert.Nil(s.T(), err)
+	s.Require().Nil(theDeleteStep.Execute(sctx))
 
 	mock.ExpectCommit()
-	err = tx.Commit()
-	assert.Nil(s.T(), err)
+	s.Require().Nil(tx.Commit())
 }
 
 func TestWorkloadStepSuite(t *testing.T) {

@@ -78,6 +78,7 @@ type TableConfig struct {
 	UniqueKeyColumnNames []string
 }
 
+// SortedClone clonse a table config with the columns sorted.
 func (cfg *TableConfig) SortedClone() *TableConfig {
 	return &TableConfig{
 		TableID:              cfg.TableID,
@@ -88,20 +89,21 @@ func (cfg *TableConfig) SortedClone() *TableConfig {
 	}
 }
 
-func (cfgA *TableConfig) IsDeepEqual(cfgB *TableConfig) bool {
-	if cfgA == nil || cfgB == nil {
+// IsDeepEqual compares two tables configs to see whether all the values are equal.
+func (cfg *TableConfig) IsDeepEqual(cfgB *TableConfig) bool {
+	if cfg == nil || cfgB == nil {
 		return false
 	}
-	if cfgA.TableID != cfgB.TableID ||
-		cfgA.DatabaseName != cfgB.DatabaseName ||
-		cfgA.TableName != cfgB.TableName {
+	if cfg.TableID != cfgB.TableID ||
+		cfg.DatabaseName != cfgB.DatabaseName ||
+		cfg.TableName != cfgB.TableName {
 		return false
 	}
-	if !AreColDefinitionsEqual(cfgA.Columns, cfgB.Columns) {
+	if !AreColDefinitionsEqual(cfg.Columns, cfgB.Columns) {
 		return false
 	}
 	// begin to check the unique key names
-	if !reflect.DeepEqual(cfgA.UniqueKeyColumnNames, cfgB.UniqueKeyColumnNames) {
+	if !reflect.DeepEqual(cfg.UniqueKeyColumnNames, cfgB.UniqueKeyColumnNames) {
 		return false
 	}
 	return true
